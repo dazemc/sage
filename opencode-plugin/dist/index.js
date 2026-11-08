@@ -155,9 +155,11 @@ function pickTiers(layers) {
             const description = typeof spec.description === "string" && spec.description.trim()
                 ? spec.description
                 : `Use the ${name} model`;
+            const rank = typeof spec.rank === "number" ? spec.rank : out.length;
             out.push({
                 name,
                 model,
+                rank,
                 description: description.replace(/\s+/g, " ").trim().slice(0, TOOL_DESC_CHARS),
             });
         }
@@ -488,13 +490,15 @@ async function routePayload(cfg, target, payload) {
     // Model tier is an independent question answered in the same round-trip:
     // it stays useful even when the tool decision is below threshold.
     let changed = false;
-    if (answer.tier && answer.tier.confidence >= cfg.tierMinConfidence) {
-        const tier = cfg.tiers.find((candidate) => candidate.name === answer.tier?.name);
+    if (answer.tier && answer.tier.confidence >= 0.35) {
+        const ordered = [...cfg.tiers].sort((a, b) => (a.rank ?? 0) - (b.rank ?? 0));
+        const step = Math.floor((answer.tier.confidence - 0.35) / 0.05);
+        const tier = ordered[Math.max(0, Math.min(ordered.length - 1, step))];
         const current = typeof payload.model === "string" ? payload.model : undefined;
         if (tier && current !== undefined && current !== tier.model) {
             payload.model = tier.model;
             changed = true;
-            log(`apply: model ${current} -> ${tier.model} (${tier.name}@${answer.tier.confidence} >= tierMinConfidence ${cfg.tierMinConfidence})`);
+            log(`apply: model ${current} -> ${tier.model} (${tier.name}@${answer.tier.confidence} band ${step})`);
         }
     }
     const at = `${answer.choice}@${answer.confidence}`;

@@ -29,7 +29,8 @@ function normaliseTiers(raw) {
       typeof spec.description === "string" && spec.description.trim()
         ? spec.description
         : `Use the ${name} model`;
-    out.push({ name, model, provider, description: description.slice(0, 200) });
+    const rank = typeof spec.rank === "number" ? spec.rank : out.length;
+    out.push({ name, model, provider, rank, description: description.slice(0, 200) });
   }
   return out;
 }
@@ -85,13 +86,15 @@ export default definePluginEntry({
             log(cfg, "malformed answer — leaving model unchanged");
             return undefined;
           }
-          const tier = cfg.tiers.find((candidate) => candidate.name === answer.choice);
           const confidence = Number(answer.confidence);
-          if (!tier || !Number.isFinite(confidence)) return undefined;
-          if (confidence < cfg.tierMinConfidence) {
-            log(cfg, `bypass: ${tier.name}@${confidence.toFixed(3)} < ${cfg.tierMinConfidence}`);
+          if (!Number.isFinite(confidence) || confidence < 0.35) {
+            log(cfg, `bypass: confidence ${confidence} < 0.35`);
             return undefined;
           }
+          const ordered = [...cfg.tiers].sort((a, b) => (a.rank ?? 0) - (b.rank ?? 0));
+          const step = Math.floor((confidence - 0.35) / 0.05);
+          const tier = ordered[Math.max(0, Math.min(ordered.length - 1, step))];
+          if (!tier) return undefined;
           log(cfg, `apply: ${tier.name}@${confidence.toFixed(3)} -> ${tier.model}`);
           return {
             modelOverride: tier.model,

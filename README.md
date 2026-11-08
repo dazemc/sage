@@ -107,9 +107,15 @@ to `kimi-k3` in both the generated ladder and the live configs.
 sage watch
 ```
 
-A live full-screen view of both consumers: decisions per minute, apply rate, and the
-last few decisions with their confidence. `q` quits. It reads the same logs `stats`
-does, so there is no daemon and nothing to enable — useful while a build is running.
+A btop-style monitor: per-consumer panel with the model currently in use, an applied-rate
+bar, the last decisions, a decisions/sec sparkline and a spinner. `q` quits. It reads the
+same logs `stats` does — no daemon, nothing to enable.
+
+## Confidence bands
+
+Model selection is a ramp, not a threshold: confidence `0.35` maps to the weakest rung,
+each further `0.05` steps one rung up (`0.40` → 2nd, `0.45` → 3rd …). Rungs carry an
+explicit `rank`, so the order survives YAML/JSON round-trips.
 
 ## Shell completion
 
