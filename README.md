@@ -28,9 +28,23 @@ Cost and capability are not linear. On a real workload most steps are mechanical
 
 A router that can name the difficulty of a step turns that into a pricing decision instead of a vibe.
 
+## How models are ranked
+
+Three components, all visible in `RANKING.md`:
+
+| component | weight | meaning |
+|---|---|---|
+| **capability** | 60% | vendor price signal normalised across the catalog, plus bonuses for reasoning / tools / vision / context. Locals are scored by parameter-file size (`30 + 2 × GB`, capped at 85). |
+| **value** | 25% | capability per dollar: `100 / (1 + 2 × blended price)`. Locals score 100. |
+| **tokens** | 15% | context window normalised; locals capped at 55 because they are hardware-bound. |
+
+`blended price = 0.7 × input + 0.3 × output`, so long-context work is weighted like the invoice is.
+
+The catalog carries no benchmark numbers, so capability is a **price proxy with explicit bonuses** — not a measurement. It is documented here so you can disagree with it and change the weights.
+
 ## How the tiers are built
 
-Sage derives tiers from the model catalog's own numbers, not from marketing names:
+Tiers are the rungs a router climbs, assigned by **price** (what you pay), while the ranking inside a tier is by composite score:
 
 | rule | tier |
 |---|---|
@@ -41,7 +55,22 @@ Sage derives tiers from the model catalog's own numbers, not from marketing name
 | < $2.00/M in | 4 `strong` |
 | everything above | 5 `frontier` |
 
-Within a tier, models are ordered by `3 × input + output` price — input-heavy work (long context) is weighted accordingly.
+## Local preference
+
+If a model is reachable both from a cloud catalog and from local Ollama weights, Sage **drops the hosted copy and keeps the local one** — free, private, no egress. Matching is by normalised model name (case, separators and `:latest` ignored). No duplicates exist on this machine today, but the rule is implemented and tested by the dedupe pass.
+
+## Fan out to multiple agents
+
+```sh
+# dry run — show which model each agent would get
+python3 sage.py spawn --task "Summarise this repository" --tiers cheap,strong,frontier --dry-run
+
+# real run: one opencode agent per rung, in parallel, logged per agent
+python3 sage.py spawn --task "Summarise this repository" --tiers cheap,strong,frontier
+# → spawn-cheap.log, spawn-strong.log, spawn-frontier.log
+```
+
+Each agent runs with the model that Sage assigned to its rung, so you can compare a cheap attempt against a frontier attempt on the same task, or split work across tiers. Logs are written beside the tool; exit codes are reported per agent.
 
 Tier descriptions are written for the *router*, not for humans: they describe the work a tier should handle ("multi-file refactors, architecture, ambiguous specs"), because that is what the decision model reads.
 

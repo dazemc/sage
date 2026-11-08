@@ -63,16 +63,61 @@ TIER_DESCRIPTIONS = {
     "frontier": "Frontier reasoning: long-horizon autonomous work where a wrong answer is expensive",
 }
 
-def tier_for(price_in: float, price_out: float, local: bool) -> int:
-    if local:
+def blended_price(model: dict) -> float:
+    return model["cost_input"] * 0.7 + model["cost_output"] * 0.3
+
+
+def compute_scores(models: list[dict]) -> None:
+    """Three transparent components, no invented benchmarks.
+
+    capability — the vendor's own price signal, normalised to 0-100 across the
+    catalog, plus small bonuses for reasoning/tools/multimodal/context. Within
+    one provider, price tracks capability far better than a name heuristic.
+    price      — value score: how much capability you get per dollar (locals 100).
+    tokens     — context window, normalised, with locals capped (hardware-bound).
+    """
+    priced = [m for m in models if not m["local"]]
+    prices = sorted(blended_price(m) for m in priced) or [0.0]
+    lo, hi = min(prices), max(prices)
+
+    for m in models:
+        if m["local"]:
+            m["capability"] = round(min(85.0, 30.0 + float(m.get("size_gb") or 4.0) * 2.0), 1)
+        else:
+            p = blended_price(m)
+            span = (hi - lo) or 1.0
+            m["capability"] = round(15.0 + 80.0 * ((p - lo) / span), 1)
+            if m.get("reasoning"):
+                m["capability"] = min(100.0, m["capability"] + 4)
+            if m.get("tool_call"):
+                m["capability"] = min(100.0, m["capability"] + 2)
+            if m.get("multimodal"):
+                m["capability"] = min(100.0, m["capability"] + 2)
+
+    for m in models:
+        if m["local"]:
+            m["price_score"] = 100.0
+        else:
+            p = blended_price(m)
+            m["price_score"] = 100.0 if p <= 0 else round(max(0.0, min(100.0, 100.0 / (1.0 + p * 2))), 1)
+        ctx = m.get("context") or 0
+        m["tokens_score"] = 55.0 if m["local"] else round(min(100.0, ctx / 1_000_000 * 100), 1)
+        m["score"] = round(0.60 * m["capability"] + 0.25 * m["price_score"] + 0.15 * m["tokens_score"], 1)
+
+
+def tier_of(model: dict) -> int:
+    """Routing rung by price (the thing you actually pay), locals on rung 0.
+    Ranking order is the composite score; the tier is what a router climbs."""
+    if model["local"]:
         return 0
-    if price_in == 0 and price_out == 0:
+    pin, pout = model["cost_input"], model["cost_output"]
+    if pin == 0 and pout == 0:
         return 1
-    if price_in <= 0.20 and price_out <= 0.60:
+    if pin <= 0.20 and pout <= 0.60:
         return 2
-    if price_in <= 1.00:
+    if pin <= 1.00:
         return 3
-    if price_in < 2.00:
+    if pin < 2.00:
         return 4
     return 5
 
@@ -101,7 +146,6 @@ def load_hosted() -> list[dict]:
                 "tool_call": bool(model.get("tool_call")),
                 "multimodal": "image" in ((model.get("modalities") or {}).get("input") or []),
                 "description": (model.get("description") or "").strip(),
-                "tier": tier_for(pin, pout, False),
             }
         )
     return out
@@ -120,6 +164,14 @@ def load_local() -> list[dict]:
         name = parts[0]
         if "openjev" in name.lower() or name.startswith("qwen:"):
             continue  # decision model, not a chat model
+        size_gb = 0.0
+        for i, part in enumerate(parts):
+            if part.upper() in ("GB", "MB") and i > 0:
+                try:
+                    size_gb = float(parts[i - 1]) * (1 if part.upper() == "GB" else 0.001)
+                except ValueError:
+                    size_gb = 0.0
+                break
         out.append(
             {
                 "id": f"ollama/{name}",
@@ -133,33 +185,43 @@ def load_local() -> list[dict]:
                 "reasoning": True,
                 "tool_call": True,
                 "multimodal": False,
+                "size_gb": round(size_gb, 1),
                 "description": "Local Ollama model — free, private, hardware-bound",
-                "tier": 0,
+                "release_date": "",
             }
         )
     return out
 
 
 def rank(models: list[dict]) -> list[dict]:
+    compute_scores(models)
     for m in models:
-        m["rank_score"] = round(m["cost_input"] * 3 + m["cost_output"], 3)
-    return sorted(models, key=lambda m: (m["tier"], m["rank_score"], m["id"]))
+        m["tier"] = tier_of(m)
 
+    # Local preference: if the same model is reachable both ways, keep the local
+    # copy (free, private, no egress) and drop the hosted duplicate.
+    def norm(model: dict) -> str:
+        base = model["id"].split("/")[-1].lower()
+        return base.replace(":latest", "").replace("-", "").replace("_", "")
 
+    local_keys = {norm(m) for m in models if m["local"]}
+    kept = []
+    for m in models:
+        if not m["local"] and norm(m) in local_keys:
+            continue
+        kept.append(m)
+    return sorted(kept, key=lambda m: (-m["score"], m["id"]))
 def table(models: list[dict]) -> str:
-    lines = ["| tier | model | in $/M | out $/M | ctx | tags |", "|---|---|---|---|---|---|"]
-    for m in models:
+    lines = [
+        "| rank | tier | model | score | perf | price | tokens | $/M in | $/M out | ctx |",
+        "|---|---|---|---|---|---|---|---|---|---|",
+    ]
+    for i, m in enumerate(models, 1):
         ctx = f"{m['context']:,}" if m.get("context") else "—"
-        tags = ", ".join(
-            t for t in (
-                "reasoning" if m.get("reasoning") else "",
-                "tools" if m.get("tool_call") else "",
-                "vision" if m.get("multimodal") else "",
-                "local" if m.get("local") else "",
-            ) if t
-        )
+        tag = "local" if m["local"] else ""
         lines.append(
-            f"| {m['tier']} {TIER_NAMES[m['tier']]} | `{m['id']}` | {m['cost_input']} | {m['cost_output']} | {ctx} | {tags} |"
+            f"| {i} | {m['tier']} {TIER_NAMES[m['tier']]} | `{m['id']}` {tag} | {m['score']} | "
+            f"{m['capability']} | {m['price_score']} | {m['tokens_score']} | {m['cost_input']} | {m['cost_output']} | {ctx} |"
         )
     return "\n".join(lines)
 
@@ -184,7 +246,42 @@ def openclaw_json5(models: list[dict]) -> str:
     return json.dumps({"tiers": tiers}, indent=2) + "\n"
 
 
+def spawn(argv: list[str]) -> None:
+    """Fan a task out to several agents, one per rung, using opencode."""
+    import argparse
+    import os
+    import subprocess
+
+    ap = argparse.ArgumentParser(prog="sage spawn")
+    ap.add_argument("--task", required=True)
+    ap.add_argument("--tiers", default="cheap,strong,frontier")
+    ap.add_argument("--dry-run", action="store_true")
+    args = ap.parse_args(argv)
+
+    models = {m["id"].split("/")[-1]: m for m in rank(load_local() + load_hosted())}
+    ladder = dict(OPENCODE_LADDER)
+    procs = []
+    for i, name in enumerate([t.strip() for t in args.tiers.split(",") if t.strip()]):
+        model = ladder.get(name)
+        if not model:
+            print(f"skip {name}: not in ladder")
+            continue
+        cmd = ["opencode", "run", args.task, "--model", f"opencode-go/{model}"]
+        print(("would run: " if args.dry_run else "spawn: ") + " ".join(cmd[:2]) + f" … --model opencode-go/{model}")
+        if not args.dry_run:
+            log = open(f"spawn-{name}.log", "w")
+            procs.append((name, subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT)))
+    if procs:
+        print("waiting for", len(procs), "agents…")
+        for name, proc in procs:
+            proc.wait()
+            print(f"  {name}: exit {proc.returncode} → spawn-{name}.log")
+
+
 def main() -> None:
+    if len(sys.argv) > 1 and sys.argv[1] == "spawn":
+        spawn(sys.argv[2:])
+        return
     models = rank(load_local() + load_hosted())
     if "--table" in sys.argv:
         print(table(models))
