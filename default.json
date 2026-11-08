@@ -1,0 +1,8 @@
+{
+  "id": "opencode-go/gpt-6-luna",
+  "latency_ms": 1707,
+  "model": "gpt-6-luna",
+  "picked_at": "1794116679",
+  "provider": "opencode-go",
+  "why": "cheapest model within 1.5x of fastest probe"
+}

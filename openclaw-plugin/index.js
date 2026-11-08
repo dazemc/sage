@@ -87,15 +87,38 @@ export default definePluginEntry({
             return undefined;
           }
           const confidence = Number(answer.confidence);
-          if (!Number.isFinite(confidence) || confidence < 0.35) {
-            log(cfg, `bypass: confidence ${confidence} < 0.35`);
+          const ordered = [...cfg.tiers].sort((a, b) => (a.rank ?? 0) - (b.rank ?? 0));
+          if (ordered.length === 0) return undefined;
+          // 20 ways to split the mass means a decisive answer sits near 0.27, so a
+          // fixed 0.35 threshold would never fire. Gate at 50% above uniform, then
+          // take the expected rung from the whole distribution.
+          const gate = 1.5 / ordered.length;
+          if (!Number.isFinite(confidence) || confidence < gate) {
+            log(cfg, `bypass: ${answer.choice}@${confidence} < gate ${gate.toFixed(3)}`);
             return undefined;
           }
-          const ordered = [...cfg.tiers].sort((a, b) => (a.rank ?? 0) - (b.rank ?? 0));
-          const step = Math.floor((confidence - 0.35) / 0.05);
-          const tier = ordered[Math.max(0, Math.min(ordered.length - 1, step))];
+          let index = Math.floor((confidence - gate) / 0.05);
+          const probs = answer.probabilities;
+          let why = `band ${index}`;
+          if (probs && typeof probs === "object") {
+            let weighted = 0;
+            let mass = 0;
+            ordered.forEach((rung, i) => {
+              const p = Number(probs[rung.name]);
+              if (Number.isFinite(p) && p > 0) {
+                weighted += p * i;
+                mass += p;
+              }
+            });
+            if (mass > 0) {
+              const expected = weighted / mass;
+              index = Math.round(expected);
+              why = `expected rung ${expected.toFixed(2)} p1 ${confidence.toFixed(3)}`;
+            }
+          }
+          const tier = ordered[Math.max(0, Math.min(ordered.length - 1, index))];
           if (!tier) return undefined;
-          log(cfg, `apply: ${tier.name}@${confidence.toFixed(3)} -> ${tier.model}`);
+          log(cfg, `apply: ${tier.name} -> ${tier.model} (${why})`);
           return {
             modelOverride: tier.model,
             ...(tier.provider ? { providerOverride: tier.provider } : {}),

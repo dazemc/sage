@@ -77,9 +77,9 @@ fn blended(m: &Model) -> f64 {
     m.cost_input * 0.7 + m.cost_output * 0.3
 }
 
-fn load_availability(root: &Path) -> BTreeMap<String, bool> {
+fn load_health(root: &Path) -> BTreeMap<String, (bool, Option<u64>)> {
     let mut out = BTreeMap::new();
-    let Ok(text) = fs::read_to_string(root.join("availability.json")) else {
+    let Ok(text) = fs::read_to_string(sage_root().join("availability.json")) else {
         return out;
     };
     let Ok(v) = serde_json::from_str::<Value>(&text) else {
@@ -88,11 +88,72 @@ fn load_availability(root: &Path) -> BTreeMap<String, bool> {
     if let Some(models) = v.get("models").and_then(|m| m.as_object()) {
         for (id, entry) in models {
             if let Some(ok) = entry.get("ok").and_then(|b| b.as_bool()) {
-                out.insert(id.clone(), ok);
+                let ms = entry.get("latency_ms").and_then(|n| n.as_u64());
+                out.insert(id.clone(), (ok, ms));
             }
         }
     }
     out
+}
+
+fn load_availability(root: &Path) -> BTreeMap<String, bool> {
+    load_health(root).into_iter().map(|(k, (ok, _))| (k, ok)).collect()
+}
+
+/// "Fastest while cheapest": the cheapest live model that is within 1.5x of the
+/// quickest response time. Price wins ties, capability breaks them.
+fn pick_default(models: &[Model], health: &BTreeMap<String, (bool, Option<u64>)>) -> Option<(String, u64, Rung)> {
+    let live: Vec<(&Model, u64)> = models
+        .iter()
+        .filter_map(|m| match health.get(&m.id) {
+            Some((true, Some(ms))) if *ms > 0 => Some((m, *ms)),
+            _ => None,
+        })
+        .collect();
+    if live.is_empty() {
+        return None;
+    }
+    let fastest = live.iter().map(|(_, ms)| *ms).min().unwrap_or(0);
+    let ceiling = (fastest as f64 * 1.5).max(fastest as f64);
+    let mut pool: Vec<&(&Model, u64)> = live.iter().filter(|(_, ms)| *ms as f64 <= ceiling).collect();
+    pool.sort_by(|a, b| {
+        blended(a.0)
+            .partial_cmp(&blended(b.0))
+            .unwrap()
+            .then_with(|| b.0.capability.partial_cmp(&a.0.capability).unwrap())
+            .then_with(|| a.1.cmp(&b.1))
+    });
+    let (m, ms) = *pool.first()?;
+    Some((
+        m.id.clone(),
+        *ms,
+        Rung {
+            name: rung_name(m),
+            provider: m.provider.clone(),
+            model: rung_name(m),
+            description: rung_description(m),
+            rank: 0,
+        },
+    ))
+}
+
+fn write_default(root: &Path) -> Option<(String, u64, Rung)> {
+    let models: Vec<Model> = fs::read_to_string(root.join("models.json"))
+        .ok()
+        .and_then(|t| serde_json::from_str(&t).ok())?;
+    let health = load_health(root);
+    let picked = pick_default(&models, &health)?;
+    let (id, ms, ref rung) = picked;
+    let doc = json!({
+        "id": id,
+        "model": rung.model,
+        "provider": rung.provider,
+        "latency_ms": ms,
+        "picked_at": chrono_like(),
+        "why": "cheapest model within 1.5x of fastest probe",
+    });
+    let _ = fs::write(root.join("default.json"), serde_json::to_string_pretty(&doc).unwrap() + "\n");
+    Some((id, ms, rung.clone()))
 }
 
 fn load_benchmarks(root: &Path) -> BTreeMap<String, f64> {
@@ -117,11 +178,36 @@ fn load_benchmarks(root: &Path) -> BTreeMap<String, f64> {
 
 fn benchmark_score(m: &Model, table: &BTreeMap<String, f64>) -> Option<f64> {
     let hay = format!("{} {}", m.name.to_lowercase(), m.id.to_lowercase());
-    table
+    if let Some((_, v)) = table
         .iter()
         .filter(|(k, _)| hay.contains(k.as_str()))
         .max_by_key(|(k, _)| k.len())
-        .map(|(_, v)| *v)
+    {
+        return Some(*v);
+    }
+    // No entry for this exact id: inherit from the closest benchmarked family,
+    // matched on whole hyphen tokens so `grok-4.7` borrows `grok-4.6`, and
+    // `gemini-4-argon` borrows `gemini-4`. A price-derived guess put a $2
+    // frontier model in the middle of the ladder, below a $0.10 haiku.
+    let stem = m.id.rsplit('/').next().unwrap_or(&m.id).to_lowercase();
+    let tokens: Vec<&str> = stem.split('-').collect();
+    table
+        .iter()
+        .filter_map(|(k, v)| {
+            let key_tokens: Vec<&str> = k.split('-').collect();
+            let shared = tokens
+                .iter()
+                .zip(key_tokens.iter())
+                .take_while(|(a, b)| a == b)
+                .count();
+            if shared >= 1 && key_tokens[0].len() >= 3 {
+                Some((shared, (*v * 1000.0) as i64, *v))
+            } else {
+                None
+            }
+        })
+        .max_by_key(|(shared, weighted, _)| (*shared, *weighted))
+        .map(|(_, _, v)| v)
 }
 
 fn load_hosted(_root: &Path) -> Vec<Model> {
@@ -354,6 +440,125 @@ struct Rung {
     rank: u32,
 }
 
+
+/// Family key: strip trailing version tokens so `mimo-v2.5` and `mimo-v2.6-flash`
+/// share a family, and variant suffixes stay distinct (`-flash` != `-pro`).
+fn family_key(id: &str) -> (String, String, f64) {
+    let name = id.rsplit('/').next().unwrap_or(id);
+    let parts: Vec<&str> = name.split('-').collect();
+    let mut family = Vec::new();
+    let mut variant = Vec::new();
+    let mut version = 0.0f64;
+    for part in parts {
+        let digits: String = part.chars().filter(|c| c.is_ascii_digit() || *c == '.').collect();
+        let is_version = !digits.is_empty()
+            && digits.chars().filter(|c| c.is_ascii_digit()).count() >= 1
+            && (part.starts_with('v') || part.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false));
+        if is_version && family.is_empty() {
+            version = digits.trim_start_matches('v').parse().unwrap_or(0.0);
+        } else if is_version {
+            version = version.max(digits.trim_start_matches('v').parse().unwrap_or(0.0));
+        } else if version > 0.0 {
+            variant.push(part);
+        } else {
+            family.push(part);
+        }
+    }
+    (family.join("-"), variant.join("-"), version)
+}
+
+/// A model is superseded when a newer release of the same family + variant costs
+/// no more. This is how deprecated ids get retired without waiting for an error:
+/// opencode only warns at request time (glm-5.1), some never warn at all (mimo-v2.5).
+fn superseded(models: &[Model]) -> BTreeMap<String, String> {
+    let production = |m: &&Model| {
+        !m.local
+            && !m.id.ends_with("-free")
+            && !m.id.contains("-free-")
+            && !m.id.contains("preview")
+            && !m.id.contains("alpha")
+    };
+    let mut best: BTreeMap<(String, String), (f64, &Model)> = BTreeMap::new();
+    for m in models.iter().filter(production) {
+        let (family, variant, version) = family_key(&m.id);
+        let key = (family, variant);
+        match best.get(&key) {
+            Some((v, other)) if *v >= version && other.cost_input <= m.cost_input => {}
+            Some((v, other)) if *v > version || (v == &version && other.cost_input <= m.cost_input) => {}
+            _ => {
+                best.insert(key, (version, m));
+            }
+        }
+    }
+    let mut out = BTreeMap::new();
+    for m in models.iter().filter(production) {
+        let (family, variant, version) = family_key(&m.id);
+        if let Some((best_version, best_model)) = best.get(&(family.clone(), variant.clone())) {
+            if *best_version > version && best_model.cost_input <= m.cost_input + f64::EPSILON {
+                out.insert(m.id.clone(), best_model.id.clone());
+                continue;
+            }
+        }
+        // A base model (no variant suffix) is also succeeded by any newer variant
+        // of its family: mimo-v2.5 -> mimo-v2.6-flash, since no plain v2.6 exists.
+        if variant.is_empty() {
+            let successor = models
+                .iter()
+                .filter(|other| !other.local && other.id != m.id)
+                .filter(|other| !other.id.ends_with("-free") && !other.id.contains("-free-") && !other.id.contains("preview") && !other.id.contains("alpha"))
+                .filter(|other| {
+                    let (f, _, v) = family_key(&other.id);
+                    f == family && v > version && other.cost_input <= m.cost_input + f64::EPSILON
+                })
+                .min_by(|a, b| a.cost_input.partial_cmp(&b.cost_input).unwrap());
+            if let Some(better) = successor {
+                out.insert(m.id.clone(), better.id.clone());
+            }
+        }
+    }
+    out
+}
+
+fn catalog_age_days() -> Option<u64> {
+    let path = home().join(".cache/opencode/models.json");
+    let meta = fs::metadata(path).ok()?;
+    let modified = meta.modified().ok()?;
+    let age = std::time::SystemTime::now().duration_since(modified).ok()?;
+    Some(age.as_secs() / 86_400)
+}
+
+/// Refresh the opencode model catalog from models.dev. The local cache was two
+/// months stale and missing every model released since, which is how a retired
+/// id (mimo-v2.5) stayed in the ladder while its replacement never appeared.
+fn refresh_catalog(force: bool) -> Result<(), String> {
+    if !force && catalog_age_days().map(|d| d < 7).unwrap_or(false) {
+        return Ok(());
+    }
+    let out = Command::new("curl")
+        .args(["-fsSL", "--max-time", "25", "https://models.dev/api.json"])
+        .output()
+        .map_err(|e| format!("curl: {e}"))?;
+    if !out.status.success() {
+        return Err("models.dev fetch failed".into());
+    }
+    let fresh: Value = serde_json::from_slice(&out.stdout).map_err(|e| format!("models.dev json: {e}"))?;
+    let path = home().join(".cache/opencode/models.json");
+    let mut cache: Value = fs::read_to_string(&path)
+        .ok()
+        .and_then(|t| serde_json::from_str(&t).ok())
+        .unwrap_or_else(|| json!({}));
+    if let Some(providers) = fresh.as_object() {
+        for (name, body) in providers {
+            if name == PROVIDER || name == "opencode" {
+                cache[name] = body.clone();
+            }
+        }
+    }
+    fs::write(&path, serde_json::to_string(&cache).unwrap()).map_err(|e| format!("{}: {e}", path.display()))?;
+    println!("refreshed model catalog from models.dev");
+    Ok(())
+}
+
 fn rung_name(m: &Model) -> String {
     m.id.rsplit('/').next().unwrap_or(&m.id).to_string()
 }
@@ -377,9 +582,10 @@ fn build_ladders(
     models: &[Model],
     availability: &BTreeMap<String, bool>,
 ) -> (Vec<Rung>, Vec<Rung>) {
+    let retired = superseded(models);
     let mut hosted: Vec<&Model> = models
         .iter()
-        .filter(|m| !m.local && available(m, availability))
+        .filter(|m| !m.local && available(m, availability) && !retired.contains_key(&m.id))
         .collect();
     hosted.sort_by(|a, b| {
         a.capability
@@ -533,6 +739,19 @@ fn generate(root: &Path) -> Result<(), String> {
     write("policy.json", policy(&models))?;
     let summary: Vec<String> = counts.iter().map(|(t, n)| format!("tier {t}={n}")).collect();
     println!("wrote {} models: {}", models.len(), summary.join(", "));
+    println!("ladder: {} rungs", oc_ladder.len());
+    let retired = superseded(&models);
+    if !retired.is_empty() {
+        let mut shown: Vec<String> = retired
+            .iter()
+            .map(|(old, new)| format!("{} -> {}", rung_name(&Model { id: old.clone(), ..models[0].clone() }), rung_name(&Model { id: new.clone(), ..models[0].clone() })))
+            .collect();
+        shown.sort();
+        println!("retired {} superseded model(s): {}", retired.len(), shown.join(", "));
+    }
+    if let Some((_, ms, rung)) = write_default(root) {
+        println!("default: {} ({}ms, cheapest within 1.5x fastest)", rung.name, ms);
+    }
     Ok(())
 }
 
@@ -613,6 +832,38 @@ fn doctor() {
     for (name, ok) in checks {
         println!("{} {name}", if ok { "ok  " } else { "FAIL" });
     }
+    let mut warned: BTreeMap<String, String> = BTreeMap::new();
+    for log in ["/tmp/opencode-jev.log", "/tmp/jev-router.log"] {
+        for line in tail_lines(log, 4000) {
+            let lower = line.to_lowercase();
+            if lower.contains("deprecated") || lower.contains("is unavailable") {
+                if let Some(id) = first_model_id(&line) {
+                    warned.insert(id, line.trim().chars().take(160).collect());
+                }
+            }
+        }
+    }
+    if warned.is_empty() {
+        println!("ok   no deprecation warnings in consumer logs");
+    } else {
+        for (id, line) in &warned {
+            println!("WARN {id}: {line}");
+        }
+        println!("{} model(s) warned at runtime — run `sage probe` then `sage apply`", warned.len());
+    }
+}
+
+fn first_model_id(line: &str) -> Option<String> {
+    for token in line.split(|c: char| c.is_whitespace() || c == ',' || c == '"') {
+        let t = token.trim_matches(|c: char| c == '(' || c == ')' || c == ':' || c == '`');
+        if t.contains('/') && !t.contains("://") && !t.ends_with(".log") {
+            let tail = t.rsplit('/').next().unwrap_or("");
+            if !tail.is_empty() && tail.chars().any(|c| c.is_ascii_digit()) {
+                return Some(t.to_string());
+            }
+        }
+    }
+    None
 }
 
 fn ask_jev(state: &str, questions: Value) -> Option<Value> {
@@ -701,7 +952,7 @@ fn list_tiers() {
 }
 
 fn list_models() {
-    let Ok(text) = fs::read_to_string("models.json") else {
+    let Ok(text) = fs::read_to_string(sage_root().join("models.json")) else {
         return;
     };
     if let Ok(models) = serde_json::from_str::<Vec<Model>>(&text) {
@@ -717,8 +968,9 @@ _sage() {
   local -a commands
   commands=(
     'stats:confidence histograms per consumer'
-    'watch:live monitor of both consumers'
-    'doctor:health of judge, ollama and the agent server'
+    'watch:live monitor (ratatui, q quits)'
+    'refresh:pull the model catalog from models.dev'
+    'doctor:health of judge, ollama, server, deprecation warnings'
     'spawn:run one agent per tier'
     'list-tiers:print ladder rungs'
     'list-models:print ranked model ids'
@@ -817,11 +1069,12 @@ complete -c sage -n '__fish_seen_subcommand_from spawn' -l dry-run
 }
 
 fn apply() -> Result<(), String> {
-    let bench = load_benchmarks(&std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+    let root = sage_root();
+    let bench = load_benchmarks(&root);
     let mut all = load_local();
-    all.extend(load_hosted(Path::new(".")));
+    all.extend(load_hosted(&root));
     let models = rank(all, &bench);
-    let availability = load_availability(&std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+    let availability = load_availability(&root);
     let (oc_ladder, ow_ladder) = build_ladders(&models, &availability);
     let jev_path = home().join(".config/jev/config.yaml");
     let text = fs::read_to_string(&jev_path).map_err(|e| format!("{}: {e}", jev_path.display()))?;
@@ -849,17 +1102,46 @@ fn apply() -> Result<(), String> {
         .cloned()
         .unwrap_or_else(|| json!({}));
     v["plugins"]["entries"]["jev-router"]["config"]["tiers"] = tiers;
+
+    let opened = write_default(&root);
+    if let Some((_, _, rung)) = &opened {
+        v["plugins"]["entries"]["jev-router"]["config"]["defaultModel"] = json!(rung.model);
+        v["plugins"]["entries"]["jev-router"]["config"]["defaultProvider"] = json!(rung.provider);
+    }
     fs::write(&oc_path, serde_json::to_string_pretty(&v).unwrap() + "\n")
         .map_err(|e| format!("{}: {e}", oc_path.display()))?;
     println!("applied ladder -> {}", oc_path.display());
+
+    if let Some((id, ms, rung)) = &opened {
+        let oc_json = home().join(".config/opencode/opencode.json");
+        if let Ok(raw) = fs::read_to_string(&oc_json) {
+            if let Ok(mut oc) = serde_json::from_str::<Value>(&raw) {
+                oc["model"] = json!(id);
+                fs::write(&oc_json, serde_json::to_string_pretty(&oc).unwrap() + "\n")
+                    .map_err(|e| format!("{}: {e}", oc_json.display()))?;
+                println!("default model -> {} ({}ms, {})", id, ms, rung.name);
+            }
+        }
+    }
     println!("restart consumers: opencode service restart && openclaw plugins reload jev-router");
     Ok(())
 }
 
-fn probe(models_file: &str, limit: usize, all: bool) -> Result<(), String> {
-    let raw = fs::read_to_string(models_file).map_err(|e| format!("{models_file}: {e}"))?;
+fn probe(models_file: &str, limit: usize, all: bool, missing: bool) -> Result<(), String> {
+    let path = if Path::new(models_file).is_absolute() {
+        PathBuf::from(models_file)
+    } else {
+        sage_root().join(models_file)
+    };
+    let raw = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
     let models: Vec<Model> = serde_json::from_str(&raw).map_err(|e| format!("models.json: {e}"))?;
-    let targets: Vec<&Model> = if all {
+    let known = load_health(&sage_root());
+    let targets: Vec<&Model> = if missing {
+        models
+            .iter()
+            .filter(|m| !known.contains_key(&m.id))
+            .collect()
+    } else if all {
         models.iter().collect()
     } else {
         let bench = load_benchmarks(Path::new("."));
@@ -874,7 +1156,15 @@ fn probe(models_file: &str, limit: usize, all: bool) -> Result<(), String> {
             .take(limit)
             .collect()
     };
-    let mut out = serde_json::Map::new();
+    let mut out = load_health(&sage_root())
+        .into_iter()
+        .map(|(id, (ok, ms))| {
+            (
+                id,
+                json!({"ok": ok, "latency_ms": ms, "checked_at": chrono_like()}),
+            )
+        })
+        .collect::<serde_json::Map<String, Value>>();
     for m in targets {
         let id = m.id.clone();
         let started = std::time::Instant::now();
@@ -896,8 +1186,9 @@ fn probe(models_file: &str, limit: usize, all: bool) -> Result<(), String> {
             }
             Err(_) => false,
         };
-        println!("{} {} ({}ms)", if ok { "ok  " } else { "FAIL" }, id, started.elapsed().as_millis());
-        out.insert(id, json!({"ok": ok, "checked_at": chrono_like()}));
+        let elapsed = started.elapsed().as_millis() as u64;
+        println!("{} {} ({}ms)", if ok { "ok  " } else { "FAIL" }, id, elapsed);
+        out.insert(id, json!({"ok": ok, "latency_ms": elapsed, "checked_at": chrono_like()}));
     }
     let doc = json!({"checked_at": chrono_like(), "models": out});
     fs::write("availability.json", serde_json::to_string_pretty(&doc).unwrap() + "
@@ -931,87 +1222,314 @@ fn tail_lines(path: &str, limit: usize) -> Vec<String> {
 }
 
 fn watch() {
-    use std::io::{Read, Write};
-    use std::sync::mpsc;
+    use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
+    use crossterm::terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen};
+    use ratatui::backend::CrosstermBackend;
+    use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
+    use ratatui::style::{Color, Modifier, Style};
+    use ratatui::text::{Line, Span};
+    use ratatui::widgets::{Block, BorderType, Borders, Gauge, List, ListItem, Paragraph, Sparkline};
+    use ratatui::Terminal;
 
-    let (tx, rx) = mpsc::channel::<u8>();
-    std::thread::spawn(move || {
-        let mut buf = [0u8; 1];
-        let mut stdin = std::io::stdin();
-        while let Ok(1) = stdin.read(&mut buf) {
-            let _ = tx.send(buf[0]);
-            if buf[0] == b'q' { break; }
-        }
-    });
+    let root = sage_root();
+    let rungs = read_ladder(&root);
+    let default_name = fs::read_to_string(root.join("default.json"))
+        .ok()
+        .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+        .and_then(|v| v.get("model").and_then(|m| m.as_str()).map(|s| s.to_string()))
+        .unwrap_or_else(|| "-".into());
 
-    let spinner = ["⠋","⠙","⠹","⠸","⠼","⠴","⠦","⠧","⠇","⠏"];
-    let mut frame_no: usize = 0;
-    let mut history: Vec<usize> = vec![];
+    // A piped stdout has no terminal to restore, so render one frame and leave.
+    let tty = std::io::IsTerminal::is_terminal(&std::io::stdout());
+    if !tty {
+        plain_frame(&rungs, &default_name, 0);
+        return;
+    }
+
     let mut stdout = std::io::stdout();
-
-    loop {
-        if let Ok(key) = rx.try_recv() {
-            if key == b'q' || key == 3 { break; }
+    if enable_raw_mode().is_err() || crossterm::execute!(stdout, EnterAlternateScreen).is_err() {
+        plain_frame(&rungs, &default_name, 0);
+        return;
+    }
+    let backend = CrosstermBackend::new(stdout);
+    let mut terminal = match Terminal::new(backend) {
+        Ok(t) => t,
+        Err(_) => {
+            let _ = disable_raw_mode();
+            return;
         }
-        frame_no += 1;
-        let router = tail_lines("/tmp/jev-router.log", 400);
-        let oc = tail_lines("/tmp/opencode-jev.log", 400);
-        let rung_count = fs::read_to_string("tiers.yaml")
-            .map(|t| t.lines().filter(|l| l.starts_with("  ") && l.trim_end().ends_with(':') && !l.trim_start().starts_with("model") && !l.trim_start().starts_with("rank") && !l.trim_start().starts_with("description")).count())
-            .unwrap_or(0);
+    };
 
-        let mut out = String::from("\x1b[2J\x1b[H");
-        out.push_str("\x1b[1;36m┌─────────────────────────────── SAGE ───────────────────────────────┐\x1b[0m\n");
-        out.push_str(&format!(
-            "\x1b[36m│\x1b[0m {} watch   rungs: \x1b[1m{}\x1b[0m   decisions logged: \x1b[1m{}\x1b[0m   \x1b[90mq quit\x1b[0m\n",
-            spinner[frame_no % spinner.len()], rung_count, router.len() + oc.len()
-        ));
-        out.push_str("\x1b[1;36m└────────────────────────────────────────────────────────────────────┘\x1b[0m\n\n");
+    let spinner = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+    let mut tick: usize = 0;
+    let mut history: Vec<u64> = vec![0; 60];
+    let mut lines_oc: usize = 0;
+    let mut lines_rr: usize = 0;
 
-        for (label, lines) in [("opencode", &oc), ("OpenClaw", &router)] {
-            let decisions: Vec<&String> = lines.iter().filter(|l| l.contains("apply:") || l.contains("bypass:")).collect();
-            let applied = decisions.iter().filter(|l| l.contains("apply:")).count();
-            let rate = if decisions.is_empty() { 0.0 } else { applied as f64 / decisions.len() as f64 * 100.0 };
-            // last model actually switched to
-            let mut model = "—".to_string();
-            for line in decisions.iter().rev() {
-                if let Some(idx) = line.find("apply: model ") {
-                    let rest = &line[idx + 13..];
-                    if let Some(arrow) = rest.find(" -> ") {
-                        let tail = &rest[arrow + 4..];
-                        model = tail.split_whitespace().next().unwrap_or("—").to_string();
-                        break;
+    let result = loop {
+        if let Ok(true) = event::poll(std::time::Duration::from_millis(120)) {
+            match event::read() {
+                Ok(Event::Key(key)) if key.kind == KeyEventKind::Press => {
+                    let quit = matches!(key.code, KeyCode::Char('q') | KeyCode::Esc)
+                        || (key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL));
+                    if quit {
+                        break Ok(());
                     }
                 }
+                Ok(_) => {}
+                Err(e) => break Err(e.to_string()),
             }
-            let bar_len = (rate / 100.0 * 30.0).round() as usize;
-            out.push_str(&format!(
-                "\x1b[1m{label}\x1b[0m  model: \x1b[32m{model}\x1b[0m\n  [\x1b[32m{}\x1b[90m{}\x1b[0m] {:.0}% applied  ({} decisions)\n",
-                "█".repeat(bar_len), "░".repeat(30 - bar_len), rate, decisions.len()
-            ));
-            for line in decisions.iter().rev().take(4) {
-                let body = line.trim().split_once("] ").map(|(_, b)| b).unwrap_or(line.trim());
-                let colour = if body.contains("apply:") { "\x1b[32m" } else { "\x1b[90m" };
-                out.push_str(&format!("  {colour}{}\x1b[0m\n", &body[..body.len().min(110)]));
-            }
-            out.push('\n');
         }
 
-        history.push(oc.iter().filter(|l| l.contains("apply:") || l.contains("bypass:")).count());
-        if history.len() > 40 { history.remove(0); }
-        let max = *history.iter().max().unwrap_or(&1).max(&1);
-        let spark: String = history.iter().map(|v| {
-            let level = ((*v as f64 / max as f64) * 7.0).round() as usize;
-            ["▁","▂","▃","▄","▅","▆","▇","█"][level.min(7)]
-        }).collect();
-        out.push_str(&format!("\x1b[90mdecisions/s\x1b[0m {spark}\n"));
-        out.push_str("\x1b[90mlogs: /tmp/opencode-jev.log  /tmp/jev-router.log\x1b[0m\n");
+        let oc = tail_lines("/tmp/opencode-jev.log", 400);
+        let rr = tail_lines("/tmp/jev-router.log", 400);
+        let oc_dec = decisions(&oc);
+        let rr_dec = decisions(&rr);
+        let total = (oc_dec.len() + rr_dec.len()) as u64;
+        if total != lines_oc as u64 + lines_rr as u64 {
+            lines_oc = oc_dec.len();
+            lines_rr = rr_dec.len();
+        }
+        history.push(total);
+        if history.len() > 120 {
+            history.remove(0);
+        }
+        let frame = spinner[tick % spinner.len()];
+        let active_oc = current_model(&oc_dec);
+        let active_rr = current_model(&rr_dec);
 
-        let _ = stdout.write_all(out.as_bytes());
-        let _ = stdout.flush();
-        std::thread::sleep(std::time::Duration::from_millis(500));
+        if let Err(e) = terminal.draw(|f| {
+            let area = f.area();
+            let rows = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Length(3), Constraint::Min(6), Constraint::Length(3)])
+                .split(area);
+
+            let title = Line::from(vec![
+                Span::styled(" SAGE ", Style::default().fg(Color::Black).bg(Color::Cyan).add_modifier(Modifier::BOLD)),
+                Span::raw(" "),
+                Span::styled(frame, Style::default().fg(Color::Cyan)),
+                Span::styled(" watch ", Style::default().fg(Color::DarkGray)),
+                Span::styled(format!("rungs {} ", rungs.len()), Style::default().fg(Color::White)),
+                Span::styled("default ", Style::default().fg(Color::DarkGray)),
+                Span::styled(format!("{default_name} "), Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+                Span::styled(format!("decisions {total} "), Style::default().fg(Color::White)),
+                Span::styled("q quit", Style::default().fg(Color::DarkGray)),
+            ]);
+            let header = Paragraph::new(title).block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded)
+                    .border_style(Style::default().fg(Color::Cyan)),
+            );
+            f.render_widget(header, rows[0]);
+
+            let cols = Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([Constraint::Percentage(38), Constraint::Percentage(62)])
+                .split(rows[1]);
+
+            let items: Vec<ListItem> = rungs
+                .iter()
+                .enumerate()
+                .map(|(i, (name, price))| {
+                    let is_active = *name == active_oc || *name == active_rr || *name == default_name;
+                    let marker = if is_active { if tick % 2 == 0 { "▸" } else { "▹" } } else { " " };
+                    let style = if is_active {
+                        Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default().fg(Color::Gray)
+                    };
+                    ListItem::new(Line::from(vec![
+                        Span::styled(format!("{marker} {:>2} ", i), Style::default().fg(Color::DarkGray)),
+                        Span::styled(format!("{name:<28}"), style),
+                        Span::styled(format!("{price}"), Style::default().fg(Color::DarkGray)),
+                    ]))
+                })
+                .collect();
+            let ladder = List::new(items).block(
+                Block::default()
+                    .title(Span::styled(" ladder ", Style::default().fg(Color::Yellow)))
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded)
+                    .border_style(Style::default().fg(Color::DarkGray)),
+            );
+            f.render_widget(ladder, cols[0]);
+
+            let right = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+                .split(cols[1]);
+            for (idx, (label, dec, active)) in [
+                ("opencode", &oc_dec, &active_oc),
+                ("OpenClaw", &rr_dec, &active_rr),
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                let applied = dec.iter().filter(|l| l.contains("apply:")).count();
+                let rate = if dec.is_empty() { 0.0 } else { applied as f64 / dec.len() as f64 };
+                let block = Block::default()
+                    .title(Line::from(vec![
+                        Span::styled(format!(" {label} "), Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+                        Span::styled(format!("{} ", active), Style::default().fg(Color::Green)),
+                    ]))
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded)
+                    .border_style(Style::default().fg(Color::DarkGray));
+                let inner = block.inner(right[idx]);
+                f.render_widget(block, right[idx]);
+                if inner.height < 3 {
+                    continue;
+                }
+                let gauge_area = Rect { height: 1, ..inner };
+                let list_area = Rect {
+                    y: inner.y + 2,
+                    height: inner.height.saturating_sub(2),
+                    ..inner
+                };
+                f.render_widget(
+                    Gauge::default()
+                        .ratio(rate.clamp(0.0, 1.0))
+                        .label(format!("{:.0}% applied  {} decisions", rate * 100.0, dec.len()))
+                        .gauge_style(Style::default().fg(Color::Green).bg(Color::Black))
+                        .use_unicode(true),
+                    gauge_area,
+                );
+                let recent: Vec<ListItem> = dec
+                    .iter()
+                    .rev()
+                    .take(list_area.height as usize)
+                    .map(|l| {
+                        let body = l.split_once("] ").map(|(_, b)| b).unwrap_or(l.as_str());
+                        let colour = if body.contains("apply:") { Color::Green } else { Color::DarkGray };
+                        ListItem::new(Line::from(Span::styled(
+                            body.chars().take(list_area.width as usize).collect::<String>(),
+                            Style::default().fg(colour),
+                        )))
+                    })
+                    .collect();
+                f.render_widget(List::new(recent), list_area);
+            }
+
+            let spark_area = Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([Constraint::Percentage(70), Constraint::Percentage(30)])
+                .split(rows[2]);
+            f.render_widget(
+                Sparkline::default()
+                    .data(&history)
+                    .style(Style::default().fg(Color::Cyan))
+                    .block(
+                        Block::default()
+                            .title(Span::styled(" decisions ", Style::default().fg(Color::DarkGray)))
+                            .borders(Borders::ALL)
+                            .border_type(BorderType::Rounded)
+                            .border_style(Style::default().fg(Color::DarkGray)),
+                    ),
+                spark_area[0],
+            );
+            f.render_widget(
+                Paragraph::new(vec![
+                    Line::from(Span::styled(
+                        format!("{} / {}", lines_oc, lines_rr),
+                        Style::default().fg(Color::White),
+                    )),
+                    Line::from(Span::styled("opencode / OpenClaw", Style::default().fg(Color::DarkGray))),
+                ])
+                .alignment(Alignment::Center)
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .border_type(BorderType::Rounded)
+                        .border_style(Style::default().fg(Color::DarkGray)),
+                ),
+                spark_area[1],
+            );
+        }) {
+            break Err(e.to_string());
+        }
+        tick += 1;
+    };
+
+    let _ = disable_raw_mode();
+    let _ = crossterm::execute!(terminal.backend_mut(), LeaveAlternateScreen);
+    let _ = terminal.show_cursor();
+    if let Err(e) = result {
+        eprintln!("sage watch: {e}");
     }
-    let _ = stdout.write_all(b"\x1b[0m\n");
+}
+
+fn read_ladder(root: &Path) -> Vec<(String, String)> {
+    let Ok(text) = fs::read_to_string(root.join("tiers.yaml")) else {
+        return vec![];
+    };
+    let mut out = vec![];
+    let mut name: Option<String> = None;
+    for line in text.lines() {
+        if line.starts_with("  ") && !line.starts_with("    ") && line.trim_end().ends_with(':') {
+            name = Some(line.trim().trim_end_matches(':').to_string());
+        } else if let Some(n) = name.clone() {
+            if let Some(price) = line.trim().strip_prefix("description:") {
+                let p = price.trim().trim_matches('"');
+                let head = p.split('·').next().unwrap_or(p).trim().to_string();
+                out.push((n, head));
+                name = None;
+            }
+        }
+    }
+    out
+}
+
+fn decisions(lines: &[String]) -> Vec<String> {
+    lines
+        .iter()
+        .filter(|l| l.contains("apply:") || l.contains("bypass:"))
+        .cloned()
+        .collect()
+}
+
+fn current_model(decisions: &[String]) -> String {
+    for line in decisions.iter().rev() {
+        if let Some(idx) = line.find("apply: model ") {
+            let rest = &line[idx + 13..];
+            if let Some(arrow) = rest.find(" -> ") {
+                return rest[arrow + 4..]
+                    .split_whitespace()
+                    .next()
+                    .unwrap_or("-")
+                    .trim_matches(|c: char| c == '(' || c == ')')
+                    .to_string();
+            }
+        }
+    }
+    "-".into()
+}
+
+fn plain_frame(rungs: &[(String, String)], default_name: &str, _tick: usize) {
+    println!("SAGE watch   rungs: {}   default: {default_name}", rungs.len());
+    for (i, (name, price)) in rungs.iter().enumerate() {
+        println!("  {i:>2} {name:<30} {price}");
+    }
+    println!("logs: /tmp/opencode-jev.log  /tmp/jev-router.log");
+}
+
+/// Sage's data dir. Never trust cwd: running `sage watch` from $HOME used to
+/// pick up a stale 4-rung tiers.yaml and report "rungs: 4".
+fn sage_root() -> PathBuf {
+    if let Ok(home) = std::env::var("SAGE_HOME") {
+        let p = PathBuf::from(home);
+        if p.is_dir() {
+            return p;
+        }
+    }
+    if let Ok(home) = std::env::var("HOME") {
+        let p = PathBuf::from(home).join(".local/share/sage");
+        if p.join("tiers.yaml").exists() || p.join("models.json").exists() {
+            return p;
+        }
+    }
+    std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
 }
 
 fn main() {
@@ -1025,17 +1543,25 @@ fn main() {
             let mut file = "models.json".to_string();
             let mut limit = 8usize;
             let mut all = false;
+            let mut missing = false;
             let mut i = 2;
             while i < args.len() {
                 match args[i].as_str() {
                     "--models" => { i += 1; file = args.get(i).cloned().unwrap_or(file); }
                     "--limit" => { i += 1; limit = args.get(i).and_then(|v| v.parse().ok()).unwrap_or(limit); }
                     "--all" => all = true,
+                    "--missing" => missing = true,
                     _ => {}
                 }
                 i += 1;
             }
-            if let Err(e) = probe(&file, limit, all) {
+            if let Err(e) = probe(&file, limit, all, missing) {
+                eprintln!("sage: {e}");
+                std::process::exit(1);
+            }
+        }
+        "refresh" => {
+            if let Err(e) = refresh_catalog(true) {
                 eprintln!("sage: {e}");
                 std::process::exit(1);
             }

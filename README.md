@@ -94,6 +94,8 @@ minimal request per candidate and records the result in `availability.json`:
 ```sh
 sage probe              # ladder models only (~2s each)
 sage probe --all        # every ranked model, slower
+sage probe --missing    # only ids with no recorded result yet
+sage refresh            # pull the catalog from models.dev (auto when >7d stale)
 ```
 
 Generation and `apply` then resolve each rung: if the configured model is marked
@@ -107,15 +109,24 @@ to `kimi-k3` in both the generated ladder and the live configs.
 sage watch
 ```
 
-A btop-style monitor: per-consumer panel with the model currently in use, an applied-rate
+A ratatui monitor: per-consumer panel with the model currently in use, an applied-rate
 bar, the last decisions, a decisions/sec sparkline and a spinner. `q` quits. It reads the
 same logs `stats` does — no daemon, nothing to enable.
 
-## Confidence bands
+## Choosing a rung
 
-Model selection is a ramp, not a threshold: confidence `0.35` maps to the weakest rung,
-each further `0.05` steps one rung up (`0.40` → 2nd, `0.45` → 3rd …). Rungs carry an
-explicit `rank`, so the order survives YAML/JSON round-trips.
+The judge answers "which rung?" as a 20-way choice, so a confident answer is only
+about `0.27` — the mass is split 20 ways. A fixed confidence threshold therefore
+pins every request to one model. Instead the whole distribution votes:
+
+```
+rung = round( Σ p_i · rank_i / Σ p_i )
+```
+
+Confidence only gates whether the answer is usable at all (50% above uniform,
+i.e. `1.5 / n`). A trivial file read lands around rung 6; a repo-wide refactor
+lands higher. Rungs carry an explicit `rank`, so the order survives YAML/JSON
+round-trips instead of depending on object key order.
 
 ## Shell completion
 
@@ -326,3 +337,22 @@ The gate is deliberately asymmetric: a wrong tool trim wastes a turn; a wrong ti
 ## License
 
 MIT. The ranking data is derived from your own machine's catalog.
+
+## Default model: fastest while cheapest
+
+`sage` picks a starting model from measured latency, not a guess: among live
+models it takes everything within **1.5x of the fastest probe**, then chooses the
+cheapest, breaking ties on capability. That id is written to `default.json` and
+pushed into `opencode.json` by `sage apply`, so a fresh session starts there
+instead of on a hand-picked model.
+
+## Retiring deprecated models
+
+opencode only warns at request time, and some retired ids never warn at all
+(`mimo-v2.5` answers happily while `mimo-v2.6-flash` exists at the same price).
+Sage retires a model when a newer release of the same family **and variant**
+costs no more — and a base model is retired by any newer variant of its family.
+Previews, `-free` and alpha builds are never treated as successors.
+
+`sage doctor` also scans the consumer logs for `deprecated` / `is unavailable`
+lines, so a warning seen in the wild can be turned into a probe + `sage apply`.

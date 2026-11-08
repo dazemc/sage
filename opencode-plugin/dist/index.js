@@ -458,10 +458,60 @@ async function askJev(cfg, state, names, descriptions = {}) {
         typeof tierAnswer.confidence === "number" &&
         Number.isFinite(tierAnswer.confidence) &&
         cfg.tiers.some((candidate) => candidate.name === tierAnswer.choice)
-        ? { name: tierAnswer.choice, confidence: tierAnswer.confidence }
+        ? {
+            name: tierAnswer.choice,
+            confidence: tierAnswer.confidence,
+            probabilities: tierAnswer.probabilities && typeof tierAnswer.probabilities === "object"
+                ? tierAnswer.probabilities
+                : undefined,
+        }
         : undefined;
     return { choice: answer.choice, confidence: answer.confidence, tier };
 }
+/**
+ * Map Jev's model_tier answer onto one rung.
+ *
+ * Confidence alone cannot index a 20-rung ladder: with 20 options a decisive
+ * answer is ~0.27 because the mass is split 20 ways, so a 0.35 threshold would
+ * pin every request to the default. Instead the whole distribution votes:
+ * the expected rung is sum(p_i * rank_i) / sum(p_i). Confidence only gates
+ * whether the answer is trustworthy at all (50% above uniform).
+ */
+function pickRung(tiers, tier) {
+    const ordered = [...tiers].sort((a, b) => (a.rank ?? 0) - (b.rank ?? 0));
+    if (ordered.length === 0) {
+        return { rung: undefined, why: "no rungs" };
+    }
+    const gate = 1.5 / ordered.length;
+    const confidence = Number(tier.confidence);
+    if (!Number.isFinite(confidence) || confidence < gate) {
+        return { rung: undefined, why: `${tier.name}@${confidence} below gate ${gate.toFixed(3)}` };
+    }
+    const probs = tier.probabilities;
+    if (probs) {
+        let weighted = 0;
+        let mass = 0;
+        ordered.forEach((rung, index) => {
+            const p = Number(probs[rung.name]);
+            if (Number.isFinite(p) && p > 0) {
+                weighted += p * index;
+                mass += p;
+            }
+        });
+        if (mass > 0) {
+            const expected = weighted / mass;
+            const index = Math.max(0, Math.min(ordered.length - 1, Math.round(expected)));
+            return {
+                rung: ordered[index],
+                why: `expected rung ${expected.toFixed(2)} of ${ordered.length - 1}, p1 ${confidence.toFixed(3)}`,
+            };
+        }
+    }
+    const step = Math.floor((confidence - gate) / 0.05);
+    const rung = ordered[Math.max(0, Math.min(ordered.length - 1, step))];
+    return { rung, why: `${tier.name}@${confidence} band ${step} (no distribution)` };
+}
+
 /* --------------------------------------------------- interception core */
 async function routePayload(cfg, target, payload) {
     const names = toolNames(payload.tools);
@@ -490,15 +540,13 @@ async function routePayload(cfg, target, payload) {
     // Model tier is an independent question answered in the same round-trip:
     // it stays useful even when the tool decision is below threshold.
     let changed = false;
-    if (answer.tier && answer.tier.confidence >= 0.35) {
-        const ordered = [...cfg.tiers].sort((a, b) => (a.rank ?? 0) - (b.rank ?? 0));
-        const step = Math.floor((answer.tier.confidence - 0.35) / 0.05);
-        const tier = ordered[Math.max(0, Math.min(ordered.length - 1, step))];
+    if (answer.tier) {
+        const pick = pickRung(cfg.tiers, answer.tier);
         const current = typeof payload.model === "string" ? payload.model : undefined;
-        if (tier && current !== undefined && current !== tier.model) {
-            payload.model = tier.model;
+        if (pick.rung && current !== undefined && current !== pick.rung.model) {
+            payload.model = pick.rung.model;
             changed = true;
-            log(`apply: model ${current} -> ${tier.model} (${tier.name}@${answer.tier.confidence} band ${step})`);
+            log(`apply: model ${current} -> ${pick.rung.model} (${pick.why})`);
         }
     }
     const at = `${answer.choice}@${answer.confidence}`;

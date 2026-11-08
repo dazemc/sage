@@ -1,8 +1,8 @@
 {
   "budget": {
     "assumed": "2000 decisions/day, 70% cheap / 25% standard / 5% strong",
-    "estimated_daily_usd": 1.37,
-    "estimated_monthly_usd": 41.13
+    "estimated_daily_usd": 1.27,
+    "estimated_monthly_usd": 37.98
   },
   "notes": [
     "Fallbacks are same-tier alternates ordered by Sage score.",
@@ -11,33 +11,35 @@
   "tiers": {
     "cheap": {
       "fallbacks": [
-        "opencode-go/deepseek-v4.1-flash",
-        "opencode-go/muse-spark-1.3-contributor"
+        "opencode-go/mimo-v2.6-flash",
+        "opencode-go/minimax-m3.1-flash"
       ],
-      "primary": "opencode-go/glm-5.3-flash"
+      "primary": "opencode-go/gpt-6-luna"
     },
     "free": {
-      "fallbacks": [],
-      "primary": "opencode-go/ox-alpha-free"
+      "fallbacks": [
+        "opencode-go/step-5-preview-free",
+        "opencode-go/longcat-2.5-preview-free"
+      ],
+      "primary": "opencode-go/minimax-m3.1-flash-free"
     },
     "frontier": {
       "fallbacks": [
-        "opencode-go/kimi-k3",
-        "opencode-go/qwen3.7-max"
+        "opencode-go/qwen3.8-max",
+        "opencode-go/gemini-4-argon"
       ],
-      "primary": "opencode-go/qwen3.8-max"
+      "primary": "opencode-go/kimi-k3.1-pro"
     },
     "standard": {
       "fallbacks": [
-        "opencode-go/deepseek-v4-pro",
-        "opencode-go/minimax-m3"
+        "opencode-go/mimo-v2.6-pro",
+        "opencode-go/deepseek-v4-pro"
       ],
       "primary": "opencode-go/gpt-5.6-luna"
     },
     "strong": {
       "fallbacks": [
-        "opencode-go/glm-5.2",
-        "opencode-go/glm-5.1"
+        "opencode-go/glm-5.2"
       ],
       "primary": "opencode-go/glm-5.3"
     }
