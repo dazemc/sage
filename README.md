@@ -59,6 +59,19 @@ Tiers are the rungs a router climbs, assigned by **price** (what you pay), while
 
 If a model is reachable both from a cloud catalog and from local Ollama weights, Sage **drops the hosted copy and keeps the local one** — free, private, no egress. Matching is by normalised model name (case, separators and `:latest` ignored). No duplicates exist on this machine today, but the rule is implemented and tested by the dedupe pass.
 
+## Shell completion
+
+```sh
+sage completions zsh  --install   # writes ~/.zfunc/_sage, prints the two fpath lines to add
+sage completions bash --install   # writes ~/.local/share/bash-completion/completions/sage
+sage completions fish --install   # writes ~/.config/fish/completions/sage.fish
+```
+
+Completion is dynamic where it matters: `--tiers` completes from `sage list-tiers`
+(the live ladder) and `list-models` prints the ranked ids for piping into other tools.
+The zsh script is checked with `zsh -n` before install; no rc file is edited for you —
+it prints the exact lines to add so nothing in your shell config changes behind your back.
+
 ## Fan out to multiple agents
 
 Automatic: Jev picks the rung **and** how many agents the task deserves.

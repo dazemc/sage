@@ -3,7 +3,7 @@
 //! Rust port of `sage.py`: same artifacts, same scoring, no runtime deps beyond
 //! serde_json. HTTP goes through `curl` so the binary stays dependency-light.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::fs;
@@ -18,7 +18,7 @@ fn home() -> PathBuf {
     PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| ".".into()))
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct Model {
     id: String,
     name: String,
@@ -592,12 +592,140 @@ fn auto_plan(_task: &str) -> Vec<String> {
         .collect()
 }
 
+fn list_tiers() {
+    for (rung, _) in OPENCODE_LADDER {
+        println!("{rung}");
+    }
+}
+
+fn list_models() {
+    let Ok(text) = fs::read_to_string("models.json") else {
+        return;
+    };
+    if let Ok(models) = serde_json::from_str::<Vec<Model>>(&text) {
+        for m in models {
+            println!("{}", m.id);
+        }
+    }
+}
+
+fn completions(shell: &str, install: bool) {
+    let zsh = r#"#compdef sage
+_sage() {
+  local -a commands
+  commands=(
+    'stats:confidence histograms per consumer'
+    'doctor:health of judge, ollama and the agent server'
+    'spawn:run one agent per tier'
+    'list-tiers:print ladder rungs'
+    'list-models:print ranked model ids'
+    'completions:print shell completion'
+  )
+  if (( CURRENT == 2 )); then
+    _describe 'command' commands
+    return
+  fi
+  case $words[2] in
+    spawn)
+      _arguments \
+        '--task[task text]:task:' \
+        '--tiers[tiers to run]:tiers:($(sage list-tiers | tr "\n" " "))' \
+        '--auto[let Jev choose tier and count]' \
+        '--dry-run[print commands only]'
+      ;;
+    completions)
+      _values 'shell' bash zsh fish
+      ;;
+  esac
+}
+_sage
+"#;
+    let bash = r#"_sage_complete() {
+  local cur="${COMP_WORDS[COMP_CWORD]}"
+  local prev="${COMP_WORDS[COMP_CWORD-1]}"
+  if [[ $COMP_CWORD -eq 1 ]]; then
+    COMPREPLY=( $(compgen -W "stats doctor spawn list-tiers list-models completions" -- "$cur") )
+    return
+  fi
+  case "$prev" in
+    --tiers) COMPREPLY=( $(compgen -W "$(sage list-tiers | tr '
+' ' ')" -- "$cur") ) ;;
+    --task) COMPREPLY=() ;;
+    completions) COMPREPLY=( $(compgen -W "bash zsh fish" -- "$cur") ) ;;
+  esac
+}
+complete -F _sage_complete sage
+"#;
+    let fish = r#"complete -c sage -f
+complete -c sage -n '__fish_use_subcommand' -a 'stats doctor spawn list-tiers list-models completions'
+complete -c sage -n '__fish_seen_subcommand_from completions' -a 'bash zsh fish'
+complete -c sage -n '__fish_seen_subcommand_from spawn' -l task -r
+complete -c sage -n '__fish_seen_subcommand_from spawn' -l tiers -r -a '(sage list-tiers)'
+complete -c sage -n '__fish_seen_subcommand_from spawn' -l auto
+complete -c sage -n '__fish_seen_subcommand_from spawn' -l dry-run
+"#;
+    let script = match shell {
+        "zsh" => zsh,
+        "bash" => bash,
+        "fish" => fish,
+        other => {
+            eprintln!("sage: unknown shell {other} (bash|zsh|fish)");
+            return;
+        }
+    };
+    if !install {
+        print!("{script}");
+        return;
+    }
+    let home = home();
+    match shell {
+        "zsh" => {
+            let dir = home.join(".zfunc");
+            let _ = fs::create_dir_all(&dir);
+            let path = dir.join("_sage");
+            if let Err(e) = fs::write(&path, script) {
+                eprintln!("sage: {e}");
+                return;
+            }
+            println!("installed {}", path.display());
+            println!("add to ~/.zshrc if missing:");
+            println!("  fpath+=~/.zfunc");
+            println!("  autoload -Uz compinit && compinit");
+        }
+        "bash" => {
+            let path = home.join(".local/share/bash-completion/completions/sage");
+            let _ = fs::create_dir_all(path.parent().unwrap());
+            if let Err(e) = fs::write(&path, script) {
+                eprintln!("sage: {e}");
+                return;
+            }
+            println!("installed {}", path.display());
+        }
+        _ => {
+            let path = home.join(".config/fish/completions/sage.fish");
+            let _ = fs::create_dir_all(path.parent().unwrap());
+            if let Err(e) = fs::write(&path, script) {
+                eprintln!("sage: {e}");
+                return;
+            }
+            println!("installed {}", path.display());
+        }
+    }
+}
+
 fn main() {
     let root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let args: Vec<String> = std::env::args().collect();
     let cmd = args.get(1).map(|s| s.as_str()).unwrap_or("");
     match cmd {
         "stats" => stats(),
+        "list-tiers" => list_tiers(),
+        "list-models" => list_models(),
+        "completions" => {
+            let shell = args.get(2).map(|s| s.as_str()).unwrap_or("zsh");
+            let install = args.iter().any(|a| a == "--install");
+            completions(shell, install);
+        }
         "doctor" => doctor(),
         "spawn" => {
             let mut task = String::new();
