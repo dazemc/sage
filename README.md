@@ -113,6 +113,15 @@ A ratatui monitor: per-consumer panel with the model currently in use, an applie
 bar, the last decisions, a decisions/sec sparkline and a spinner. `q` quits. It reads the
 same logs `stats` does — no daemon, nothing to enable.
 
+## Rung order
+
+Rungs climb by **blended cost** (`0.7 × in + 0.3 × out`), so a $2 frontier model sits
+near the top even when a $0.10 model scores close to it. Both halves of the price are
+printed in each description, because a lone input price makes the ladder look
+unordered. Within one price the weaker model comes first, and the default model is
+always pinned in — it is where every session starts, so the judge must see the price
+it is already paying.
+
 ## Choosing a rung
 
 The judge answers "which rung?" as a 20-way choice, so a confident answer is only

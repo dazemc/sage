@@ -1,124 +1,124 @@
 {
   "tiers": {
     "beam-free": {
-      "description": "$0.00/M in · Sparse mixture-of-experts reasoning model with 23B active parameters for coding and agentic workflows",
+      "description": "$0.00/M in, $0.00/M out (blend $0.00) · Sparse mixture-of-experts reasoning model with 23B active parameters for coding and agentic workflows",
       "model": "beam-free",
       "provider": "opencode-go",
-      "rank": 2
+      "rank": 1
     },
     "claude-haiku-5-5": {
-      "description": "$0.10/M in · Fast Claude model for responsive assistance, classification, and lightweight agents",
+      "description": "$0.10/M in, $0.50/M out (blend $0.22) · Fast Claude model for responsive assistance, classification, and lightweight agents",
       "model": "claude-haiku-5-5",
       "provider": "opencode-go",
       "rank": 5
     },
     "deepseek-v4.1-flash": {
-      "description": "$0.15/M in · DeepSeek V4.1 Flash model for reasoning and agentic coding",
+      "description": "$0.15/M in, $0.60/M out (blend $0.28) · DeepSeek V4.1 Flash model for reasoning and agentic coding",
       "model": "deepseek-v4.1-flash",
-      "provider": "opencode-go",
-      "rank": 6
-    },
-    "gemini-4-argon": {
-      "description": "$2.00/M in · Google's flagship reasoning model for complex software engineering, deep math and science, and long-horizon autonomous agents",
-      "model": "gemini-4-argon",
-      "provider": "opencode-go",
-      "rank": 17
-    },
-    "glm-5.3": {
-      "description": "$1.40/M in · Flagship GLM model for long-horizon coding, agents, and complex project delivery",
-      "model": "glm-5.3",
-      "provider": "opencode-go",
-      "rank": 15
-    },
-    "gpt-6-luna": {
-      "description": "$0.10/M in · OpenAI's most efficient model for focused, high-volume tasks",
-      "model": "gpt-6-luna",
-      "provider": "opencode-go",
-      "rank": 20
-    },
-    "grok-4.7": {
-      "description": "$2.00/M in · xAI's frontier model for long-running agents, coding, knowledge work, and visual projects",
-      "model": "grok-4.7",
-      "provider": "opencode-go",
-      "rank": 16
-    },
-    "hy3": {
-      "description": "$0.14/M in · Tencent Hy reasoning model for coding, instruction following, and agent tasks",
-      "model": "hy3",
-      "provider": "opencode-go",
-      "rank": 4
-    },
-    "hy4": {
-      "description": "$0.83/M in · A next-generation multimodal productivity model with significantly enhanced Agent and complex task execution capabilities.",
-      "model": "hy4",
-      "provider": "opencode-go",
-      "rank": 11
-    },
-    "hy4-preview": {
-      "description": "$0.83/M in · A next-generation productivity model with significantly enhanced Agent and complex task execution capabilities.",
-      "model": "hy4-preview",
-      "provider": "opencode-go",
-      "rank": 12
-    },
-    "iceman-contributor-free": {
-      "description": "$0.00/M in · Stealth model, free for a limited time",
-      "model": "iceman-contributor-free",
-      "provider": "opencode-go",
-      "rank": 1
-    },
-    "kimi-k3.1-pro": {
-      "description": "$2.00/M in · Multimodal Kimi model with 1M context and always-on reasoning for coding, 3D creation, financial research, and agentic work",
-      "model": "kimi-k3.1-pro",
-      "provider": "opencode-go",
-      "rank": 19
-    },
-    "longcat-2.0": {
-      "description": "$0.30/M in · Meituan LongCat-2.0, a reasoning model with tool calling and a 1M-token context window",
-      "model": "longcat-2.0",
-      "provider": "opencode-go",
-      "rank": 7
-    },
-    "mimo-v2.6-flash": {
-      "description": "$0.14/M in · MiMo Flash model for multimodal coding agents and long-context automation",
-      "model": "mimo-v2.6-flash",
-      "provider": "opencode-go",
-      "rank": 14
-    },
-    "mimo-v2.6-pro": {
-      "description": "$0.43/M in · Stronger MiMo Pro tier for multimodal reasoning and coding-agent execution",
-      "model": "mimo-v2.6-pro",
-      "provider": "opencode-go",
-      "rank": 13
-    },
-    "minimax-m3.1-flash": {
-      "description": "$0.15/M in · Frontier multimodal coding model with 1M context window and tunable thinking depth",
-      "model": "minimax-m3.1-flash",
       "provider": "opencode-go",
       "rank": 9
     },
+    "glm-5.3": {
+      "description": "$1.40/M in, $4.40/M out (blend $2.30) · Flagship GLM model for long-horizon coding, agents, and complex project delivery",
+      "model": "glm-5.3",
+      "provider": "opencode-go",
+      "rank": 17
+    },
+    "glm-5.3-flash": {
+      "description": "$0.15/M in, $0.50/M out (blend $0.26) · Native multimodal GLM model for efficient coding and long-horizon agent tasks",
+      "model": "glm-5.3-flash",
+      "provider": "opencode-go",
+      "rank": 6
+    },
+    "gpt-6-luna": {
+      "description": "$0.10/M in, $0.50/M out (blend $0.22) · OpenAI's most efficient model for focused, high-volume tasks",
+      "model": "gpt-6-luna",
+      "provider": "opencode-go",
+      "rank": 7
+    },
+    "grok-4.7": {
+      "description": "$2.00/M in, $6.00/M out (blend $3.20) · xAI's frontier model for long-running agents, coding, knowledge work, and visual projects",
+      "model": "grok-4.7",
+      "provider": "opencode-go",
+      "rank": 18
+    },
+    "hy3": {
+      "description": "$0.14/M in, $0.58/M out (blend $0.27) · Tencent Hy reasoning model for coding, instruction following, and agent tasks",
+      "model": "hy3",
+      "provider": "opencode-go",
+      "rank": 8
+    },
+    "hy4": {
+      "description": "$0.83/M in, $2.50/M out (blend $1.33) · A next-generation multimodal productivity model with significantly enhanced Agent and complex task execution capabilities.",
+      "model": "hy4",
+      "provider": "opencode-go",
+      "rank": 14
+    },
+    "hy4-preview": {
+      "description": "$0.83/M in, $2.50/M out (blend $1.33) · A next-generation productivity model with significantly enhanced Agent and complex task execution capabilities.",
+      "model": "hy4-preview",
+      "provider": "opencode-go",
+      "rank": 15
+    },
+    "iceman-contributor-free": {
+      "description": "$0.00/M in, $0.00/M out (blend $0.00) · Stealth model, free for a limited time",
+      "model": "iceman-contributor-free",
+      "provider": "opencode-go",
+      "rank": 2
+    },
+    "kimi-k3.1-pro": {
+      "description": "$2.00/M in, $10.00/M out (blend $4.40) · Multimodal Kimi model with 1M context and always-on reasoning for coding, 3D creation, financial research, and agentic work",
+      "model": "kimi-k3.1-pro",
+      "provider": "opencode-go",
+      "rank": 20
+    },
+    "longcat-2.0": {
+      "description": "$0.30/M in, $1.20/M out (blend $0.57) · Meituan LongCat-2.0, a reasoning model with tool calling and a 1M-token context window",
+      "model": "longcat-2.0",
+      "provider": "opencode-go",
+      "rank": 11
+    },
+    "mimo-v2.6-flash": {
+      "description": "$0.14/M in, $0.28/M out (blend $0.18) · MiMo Flash model for multimodal coding agents and long-context automation",
+      "model": "mimo-v2.6-flash",
+      "provider": "opencode-go",
+      "rank": 4
+    },
+    "mimo-v2.6-pro": {
+      "description": "$0.43/M in, $0.87/M out (blend $0.57) · Stronger MiMo Pro tier for multimodal reasoning and coding-agent execution",
+      "model": "mimo-v2.6-pro",
+      "provider": "opencode-go",
+      "rank": 10
+    },
+    "minimax-m3": {
+      "description": "$0.30/M in, $1.20/M out (blend $0.57) · MiniMax multimodal coding model for long-context reasoning and agent tasks",
+      "model": "minimax-m3",
+      "provider": "opencode-go",
+      "rank": 12
+    },
     "muse-spark-1.3-contributor": {
-      "description": "$0.10/M in · Muse Spark 1.3 is a multimodal reasoning model from Meta for coding and agentic workflows.",
+      "description": "$0.10/M in, $0.20/M out (blend $0.13) · Muse Spark 1.3 is a multimodal reasoning model from Meta for coding and agentic workflows.",
       "model": "muse-spark-1.3-contributor",
       "provider": "opencode-go",
       "rank": 3
     },
     "qwen3.7-plus": {
-      "description": "$0.40/M in · Multimodal reasoning model for visual analysis, planning, and tool use",
+      "description": "$0.40/M in, $1.60/M out (blend $0.76) · Multimodal reasoning model for visual analysis, planning, and tool use",
       "model": "qwen3.7-plus",
       "provider": "opencode-go",
-      "rank": 10
+      "rank": 13
     },
     "qwen3.8-max": {
-      "description": "$2.00/M in · 2.4-trillion-parameter multimodal flagship for coding, professional work, and long-horizon agentic workflows",
+      "description": "$2.00/M in, $6.00/M out (blend $3.20) · 2.4-trillion-parameter multimodal flagship for coding, professional work, and long-horizon agentic workflows",
       "model": "qwen3.8-max",
       "provider": "opencode-go",
-      "rank": 18
+      "rank": 19
     },
     "step-5-preview": {
-      "description": "$1.00/M in · StepFun's next-generation flagship base model for coding and professional knowledge work, with native text, image, and video input and a 1M-token context window",
+      "description": "$1.00/M in, $2.70/M out (blend $1.51) · StepFun's next-generation flagship base model for coding and professional knowledge work, with native text, image, and video input and a 1M-",
       "model": "step-5-preview",
       "provider": "opencode-go",
-      "rank": 8
+      "rank": 16
     }
   }
 }

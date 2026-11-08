@@ -567,7 +567,14 @@ fn rung_description(m: &Model) -> String {
     let price = if m.local {
         "local, free".to_string()
     } else {
-        format!("${:.2}/M in", m.cost_input)
+        // Rung order is blended cost, so show both halves or the ladder looks
+        // unordered next to a lone input price.
+        format!(
+            "${:.2}/M in, ${:.2}/M out (blend ${:.2})",
+            m.cost_input,
+            m.cost_output,
+            blended(m)
+        )
     };
     let base = if m.description.is_empty() {
         format!("capability {:.0}", m.capability)
@@ -587,16 +594,24 @@ fn build_ladders(
         .iter()
         .filter(|m| !m.local && available(m, availability) && !retired.contains_key(&m.id))
         .collect();
+    // Price leads the ramp: the ladder is what you pay per step, so a $2 frontier
+    // model belongs near the top even if a $0.10 model scores close to it. Within
+    // the same price the weaker model comes first, so the ramp still climbs.
     hosted.sort_by(|a, b| {
-        a.capability
-            .partial_cmp(&b.capability)
+        blended(a)
+            .partial_cmp(&blended(b))
             .unwrap()
-            .then_with(|| a.score.partial_cmp(&b.score).unwrap())
+            .then_with(|| a.capability.partial_cmp(&b.capability).unwrap())
+            .then_with(|| a.id.cmp(&b.id))
     });
 
     // Ollama caps top_logprobs at 20, so a single decision can only score 20
     // rungs. Keep the full range but sample evenly when the catalog is bigger.
-    let selected: Vec<&Model> = if hosted.len() > 20 {
+    let default_name = fs::read_to_string(sage_root().join("default.json"))
+        .ok()
+        .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+        .and_then(|v| v.get("model").and_then(|m| m.as_str()).map(|s| s.to_string()));
+    let mut selected: Vec<&Model> = if hosted.len() > 20 {
         let step = (hosted.len() - 1) as f64 / 19.0;
         (0..20)
             .map(|i| hosted[(i as f64 * step).round() as usize])
@@ -604,6 +619,17 @@ fn build_ladders(
     } else {
         hosted.clone()
     };
+    // The default model is where every session starts, so it must be a rung or
+    // the judge cannot see the price it is already paying.
+    if let Some(want) = default_name {
+        if !selected.iter().any(|m| rung_name(m) == want) {
+            if let Some(m) = hosted.iter().find(|m| rung_name(m) == want) {
+                let insert_at = hosted.iter().position(|h| std::ptr::eq(*h, *m)).unwrap_or(0);
+                selected.insert(insert_at.min(selected.len()), m);
+                selected.truncate(20);
+            }
+        }
+    }
 
     let mut opencode = vec![];
     for (i, m) in selected.iter().enumerate() {
