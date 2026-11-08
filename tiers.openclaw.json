@@ -15,15 +15,10 @@
       "provider": "opencode-go",
       "description": "Everyday edits and searches: small code changes, targeted greps, summaries"
     },
-    "standard": {
-      "model": "gpt-5.6-luna",
-      "provider": "opencode-go",
-      "description": "Moderate engineering: several files, tests, debugging a clear failure"
-    },
     "strong": {
       "model": "deepseek-v4-pro",
       "provider": "opencode-go",
-      "description": "Hard engineering: multi-file refactors, architecture, ambiguous specs"
+      "description": "Hard engineering: multi-file refactors, architecture, ambiguous specs, debugging dead-ends"
     },
     "frontier": {
       "model": "qwen3.8-max",
