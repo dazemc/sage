@@ -130,6 +130,37 @@ Generated from the live catalog on this machine. Prices are USD per million toke
 | 5 frontier | `opencode-go/qwen3.7-max` | 2.5 | 7.5 | 1,000,000 | reasoning, tools |
 | 5 frontier | `opencode-go/kimi-k3` | 3.0 | 15.0 | 1,048,576 | reasoning, tools, vision |
 
+## The niche
+
+Most routers answer **one** question: *which model should handle this request?* They sit in front of an HTTP API, see a prompt, and return a model. That is the right shape for a chat product. It is the wrong shape for a coding agent, which makes hundreds of small decisions per session and re-sends every tool schema on each one.
+
+Sage answers a different question: **how much intelligence does this step deserve, and which tool should carry it?** It runs beside the agent, not in front of a provider, and it can act on both answers in the same request.
+
+What that buys you, and what it costs:
+
+| | prompt-level routers (RouteLLM, OpenRouter Auto, NotDiamond) | Sage |
+|---|---|---|
+| decision unit | one user request | one tool step |
+| sees tool catalogue | no | yes |
+| can trim tools | no | yes |
+| data leaves the machine | usually | **never** — local classifier |
+| needs training data | RouteLLM yes | no, labels live in the request |
+| cost | per-call fee or % | electricity |
+
+The trade is honest: Sage's classifier is small, so its confidence is only as good as the state you feed it, and it needs a local GPU to stay under ~150 ms. Prompt-level routers have far more signal and no hardware requirement.
+
+## Features
+
+- **Per-step routing** — tool trim and model tier in one decision round-trip.
+- **Benchmark-weighted tiers** — capability from a dated snapshot, price-aware value, context size.
+- **Local preference** — a model reachable both hosted and locally resolves to the local copy.
+- **Fallback chains** — `policy.json` gives every tier same-tier alternates ordered by score.
+- **Budget estimate** — expected daily/monthly spend from an assumed call mix, so a tier change's cost is visible before you ship it.
+- **Deterministic decisions** — identical state yields identical answers, so a router-side cache is safe.
+- **Usage stats** — `sage.py stats` prints confidence histograms and apply rates per consumer, which is how you find out whether the gates are earning their latency.
+- **Health check** — `sage.py doctor` verifies the decision server, Ollama, and the agent server.
+- **Fan-out** — `spawn` runs one agent per rung, or `--auto` lets Jev choose tier and agent count.
+
 ## Install
 
 ```sh
