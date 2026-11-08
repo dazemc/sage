@@ -86,6 +86,21 @@ Tiers are the rungs a router climbs, assigned by **price** (what you pay), while
 
 If a model is reachable both from a cloud catalog and from local Ollama weights, Sage **drops the hosted copy and keeps the local one** — free, private, no egress. Matching is by normalised model name (case, separators and `:latest` ignored). No duplicates exist on this machine today, but the rule is implemented and tested by the dedupe pass.
 
+## Availability probing
+
+A rank is only useful if the model can actually answer. `sage probe` sends one
+minimal request per candidate and records the result in `availability.json`:
+
+```sh
+sage probe              # ladder models only (~2s each)
+sage probe --all        # every ranked model, slower
+```
+
+Generation and `apply` then resolve each rung: if the configured model is marked
+unavailable, the rung falls back to the highest-scoring available model in the same
+tier. Verified by forcing `qwen3.8-max` to `ok: false` — the frontier rung resolved
+to `kimi-k3` in both the generated ladder and the live configs.
+
 ## Shell completion
 
 ```sh

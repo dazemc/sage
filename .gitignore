@@ -1,2 +1,3 @@
 rust/target/
 __pycache__/
+availability.json
