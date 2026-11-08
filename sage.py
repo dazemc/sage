@@ -31,6 +31,30 @@ HERE = Path(__file__).resolve().parent
 CACHE = Path.home() / ".cache/opencode/models.json"
 PROVIDER = "opencode-go"
 
+BENCH_PATH = HERE / "benchmarks.json"
+
+
+def load_benchmarks() -> dict:
+    try:
+        data = json.loads(BENCH_PATH.read_text())
+    except Exception:
+        return {}
+    out = {}
+    out.update(data.get("families") or {})
+    out.update(data.get("local") or {})
+    return {k.lower(): float(v) for k, v in out.items()}
+
+
+def benchmark_score(model: dict, table: dict) -> float | None:
+    """Longest matching family key, so 'qwen3.8-max' beats 'qwen3.8'."""
+    hay = (model.get("name") or model["id"]).lower() + " " + model["id"].lower()
+    best = None
+    for key, value in table.items():
+        if key in hay and (best is None or len(key) > best[0]):
+            best = (len(key), value)
+    return best[1] if best else None
+
+
 TIER_NAMES = {
     0: "local",
     1: "free",
@@ -76,11 +100,17 @@ def compute_scores(models: list[dict]) -> None:
     price      — value score: how much capability you get per dollar (locals 100).
     tokens     — context window, normalised, with locals capped (hardware-bound).
     """
+    bench = load_benchmarks()
     priced = [m for m in models if not m["local"]]
     prices = sorted(blended_price(m) for m in priced) or [0.0]
     lo, hi = min(prices), max(prices)
 
     for m in models:
+        b = benchmark_score(m, bench) if bench else None
+        if b is not None:
+            m["benchmark"] = round(b, 1)
+            m["capability"] = round(b, 1)
+            continue
         if m["local"]:
             m["capability"] = round(min(85.0, 30.0 + float(m.get("size_gb") or 4.0) * 2.0), 1)
         else:
@@ -246,6 +276,41 @@ def openclaw_json5(models: list[dict]) -> str:
     return json.dumps({"tiers": tiers}, indent=2) + "\n"
 
 
+def ask_jev(questions: dict) -> dict:
+    """One typed decision round-trip against the local Jev server."""
+    import urllib.request
+
+    url = os.environ.get("SAGE_JEV_URL", "http://127.0.0.1:3000/v1/systemone")
+    body = json.dumps({"state": "", "model": "kev-latest", "questions": questions}).encode()
+    req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=10) as res:
+        return json.loads(res.read()).get("answers", {})
+
+
+def plan(task: str) -> dict:
+    """Jev decides the rung and how many agents the task deserves."""
+    tiers = {name: TIER_DESCRIPTIONS[name] for name, _ in OPENCLAW_LADDER}
+    questions = {
+        "tier": {"type": "choice", "instructions": "Which tier should handle this task?", "criteria": tiers},
+        "fanout": {
+            "type": "score",
+            "instructions": "How many parallel agents does this task need?",
+            "criteria": ["1 agent", "2 agents", "3 agents", "4 agents"],
+        },
+    }
+    try:
+        answers = ask_jev(questions)
+        tier = answers.get("tier", {}).get("choice", "cheap")
+        score = float(answers.get("fanout", {}).get("score", 0))
+        count = max(1, min(4, int(round(score)) + 1))
+    except Exception:
+        tier, count = "cheap", 1
+    order = [name for name, _ in OPENCLAW_LADDER]
+    start = order.index(tier) if tier in order else order.index("cheap")
+    picks = [order[min(len(order) - 1, start + i)] for i in range(count)]
+    return {"task": task, "tier": tier, "agents": count, "assignments": picks}
+
+
 def spawn(argv: list[str]) -> None:
     """Fan a task out to several agents, one per rung, using opencode."""
     import argparse
@@ -256,10 +321,15 @@ def spawn(argv: list[str]) -> None:
     ap.add_argument("--task", required=True)
     ap.add_argument("--tiers", default="cheap,strong,frontier")
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--auto", action="store_true", help="let Jev choose the tier and agent count")
     args = ap.parse_args(argv)
 
     models = {m["id"].split("/")[-1]: m for m in rank(load_local() + load_hosted())}
     ladder = dict(OPENCODE_LADDER)
+    if args.auto:
+        decision = plan(args.task)
+        args.tiers = ",".join(decision["assignments"])
+        print(f"auto: tier={decision['tier']} agents={decision['agents']} -> {args.tiers}")
     procs = []
     for i, name in enumerate([t.strip() for t in args.tiers.split(",") if t.strip()]):
         model = ladder.get(name)

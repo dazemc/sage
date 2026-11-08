@@ -34,13 +34,13 @@ Three components, all visible in `RANKING.md`:
 
 | component | weight | meaning |
 |---|---|---|
-| **capability** | 60% | vendor price signal normalised across the catalog, plus bonuses for reasoning / tools / vision / context. Locals are scored by parameter-file size (`30 + 2 × GB`, capped at 85). |
+| **capability** | 60% | benchmark score from `benchmarks.json` when the family is known (LMArena / Artificial Analysis snapshot, 0–100); otherwise a price-proxy fallback. Locals fall back to weight size. |
 | **value** | 25% | capability per dollar: `100 / (1 + 2 × blended price)`. Locals score 100. |
 | **tokens** | 15% | context window normalised; locals capped at 55 because they are hardware-bound. |
 
 `blended price = 0.7 × input + 0.3 × output`, so long-context work is weighted like the invoice is.
 
-The catalog carries no benchmark numbers, so capability is a **price proxy with explicit bonuses** — not a measurement. It is documented here so you can disagree with it and change the weights.
+`benchmarks.json` ships a family-level snapshot with provenance (source, capture date, scale). It is approximate by construction: refresh it when a new generation lands, or point `SAGE_BENCH_URL` at a JSON dump with the same shape and run `sage.py benchmarks --refresh`. Models without a benchmark fall back to the price proxy, so the ranking degrades gracefully instead of breaking.
 
 ## How the tiers are built
 
@@ -60,6 +60,15 @@ Tiers are the rungs a router climbs, assigned by **price** (what you pay), while
 If a model is reachable both from a cloud catalog and from local Ollama weights, Sage **drops the hosted copy and keeps the local one** — free, private, no egress. Matching is by normalised model name (case, separators and `:latest` ignored). No duplicates exist on this machine today, but the rule is implemented and tested by the dedupe pass.
 
 ## Fan out to multiple agents
+
+Automatic: Jev picks the rung **and** how many agents the task deserves.
+
+```sh
+python3 sage.py spawn --auto --task "Refactor a monorepo across three packages" --dry-run
+# auto: tier=cheap agents=1 -> cheap
+```
+
+Manual:
 
 ```sh
 # dry run — show which model each agent would get

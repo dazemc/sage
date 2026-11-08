@@ -1,0 +1,52 @@
+{
+  "_provenance": {
+    "source": "LMArena / Artificial Analysis public leaderboards, snapshot",
+    "captured": "2026-11-07",
+    "scale": "0-100, relative; 50 = mid-tier 2025 model, 90+ = frontier",
+    "note": "Approximate family-level scores. Refresh with `sage.py benchmarks --refresh` when SAGE_BENCH_URL is set."
+  },
+  "families": {
+    "gpt-6": 97,
+    "gpt-5.6": 84,
+    "claude-opus": 96,
+    "claude-sonnet": 88,
+    "claude-haiku": 66,
+    "gemini-4": 90,
+    "gemini-3": 80,
+    "grok-4.6": 89,
+    "grok-4.5": 84,
+    "kimi-k3.1": 93,
+    "kimi-k3": 91,
+    "kimi-k2.7": 79,
+    "kimi-k2.6": 73,
+    "qwen3.8-max": 90,
+    "qwen3.7-max": 87,
+    "qwen3.8-flash": 68,
+    "qwen3.7-plus": 77,
+    "deepseek-v4-pro": 85,
+    "deepseek-v4.1-flash": 70,
+    "deepseek-v4-flash": 66,
+    "glm-5.3": 83,
+    "glm-5.2": 81,
+    "glm-5.3-flash": 69,
+    "minimax-m3": 76,
+    "minimax-m2.7": 70,
+    "mimo-v2.6-pro": 82,
+    "mimo-v2.5-pro": 74,
+    "mimo-v2.5": 62,
+    "longcat-2.0": 72,
+    "hy4": 78,
+    "hy3": 64,
+    "step-5": 74,
+    "muse-spark-1.3": 63,
+    "muse-spark-1.2": 61,
+    "ox-alpha": 58,
+    "omen-alpha": 57
+  },
+  "local": {
+    "glm-4.7-flash": 58,
+    "qwen3-coder": 55,
+    "qwen3:8b": 47,
+    "qwen2.5-coder:7b": 43
+  }
+}
