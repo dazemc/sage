@@ -166,11 +166,20 @@ The trade is honest: Sage's classifier is small, so its confidence is only as go
 ```sh
 git clone https://github.com/dazemc/sage
 cd sage
-python3 sage.py            # writes models.json, RANKING.md, tiers.yaml, tiers.openclaw.json
-python3 sage.py --table    # just print the ranking
+cargo build --release --manifest-path rust/Cargo.toml
+./rust/target/release/sage          # writes models.json, RANKING.md, tiers.yaml, tiers.openclaw.json, policy.json
+./rust/target/release/sage stats    # confidence histograms per consumer
+./rust/target/release/sage doctor   # health of judge / ollama / opencode
 ```
 
-No dependencies. It reads `~/.cache/opencode/models.json` (the OpenCode provider cache) and `ollama list`.
+The implementation is Rust (serde_json only, HTTP via `curl`). `python/sage.py` is kept as a
+reference implementation with identical scoring — useful for diffing output when changing
+the weights. It reads `~/.cache/opencode/models.json` (the OpenCode provider cache) and
+`ollama list`.
+
+Measured on this machine, full generation (40 models, five artifacts): **73 ms Rust** vs
+**96 ms Python**, both dominated by the `ollama list` subprocess. The Rust win is real but
+modest for batch generation; it matters for `doctor`/`stats` where startup cost dominates.
 
 ## Wire it into a router
 
