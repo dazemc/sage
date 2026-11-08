@@ -1,0 +1,34 @@
+{
+  "tiers": {
+    "local": {
+      "model": "qwen3:8b",
+      "provider": "ollama",
+      "description": "Trivial, mechanical steps with no ambiguity: greet, echo, single grep"
+    },
+    "free": {
+      "model": "ox-alpha-free",
+      "provider": "opencode-go",
+      "description": "Simple single-tool work: read one file, answer a short question"
+    },
+    "cheap": {
+      "model": "glm-5.3-flash",
+      "provider": "opencode-go",
+      "description": "Everyday edits and searches: small code changes, targeted greps, summaries"
+    },
+    "standard": {
+      "model": "gpt-5.6-luna",
+      "provider": "opencode-go",
+      "description": "Moderate engineering: several files, tests, debugging a clear failure"
+    },
+    "strong": {
+      "model": "deepseek-v4-pro",
+      "provider": "opencode-go",
+      "description": "Hard engineering: multi-file refactors, architecture, ambiguous specs"
+    },
+    "frontier": {
+      "model": "qwen3.8-max",
+      "provider": "opencode-go",
+      "description": "Frontier reasoning: long-horizon autonomous work where a wrong answer is expensive"
+    }
+  }
+}
