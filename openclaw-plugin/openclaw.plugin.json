@@ -2,17 +2,37 @@
   "id": "jev-router",
   "name": "Jev Router",
   "description": "Model-tier routing for agent turns using a local Jev (System One) decision server.",
-  "activation": { "onStartup": true },
+  "activation": {
+    "onStartup": true
+  },
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
     "properties": {
-      "apiUrl": { "type": "string" },
-      "model": { "type": "string" },
-      "tierMinConfidence": { "type": "number" },
-      "timeoutMs": { "type": "number" },
-      "debugFile": { "type": "string" },
-      "tiers": { "type": "object" }
+      "apiUrl": {
+        "type": "string"
+      },
+      "model": {
+        "type": "string"
+      },
+      "tierMinConfidence": {
+        "type": "number"
+      },
+      "timeoutMs": {
+        "type": "number"
+      },
+      "debugFile": {
+        "type": "string"
+      },
+      "tiers": {
+        "type": "object"
+      },
+      "defaultModel": {
+        "type": "string"
+      },
+      "defaultProvider": {
+        "type": "string"
+      }
     }
   }
 }
