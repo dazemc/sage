@@ -64,7 +64,7 @@ If a model is reachable both from a cloud catalog and from local Ollama weights,
 Automatic: Jev picks the rung **and** how many agents the task deserves.
 
 ```sh
-python3 sage.py spawn --auto --task "Refactor a monorepo across three packages" --dry-run
+sage spawn --auto --task "Refactor a monorepo across three packages" --dry-run
 # auto: tier=cheap agents=1 -> cheap
 ```
 
@@ -157,9 +157,9 @@ The trade is honest: Sage's classifier is small, so its confidence is only as go
 - **Fallback chains** — `policy.json` gives every tier same-tier alternates ordered by score.
 - **Budget estimate** — expected daily/monthly spend from an assumed call mix, so a tier change's cost is visible before you ship it.
 - **Deterministic decisions** — identical state yields identical answers, so a router-side cache is safe.
-- **Usage stats** — `sage.py stats` prints confidence histograms and apply rates per consumer, which is how you find out whether the gates are earning their latency.
-- **Health check** — `sage.py doctor` verifies the decision server, Ollama, and the agent server.
-- **Fan-out** — `spawn` runs one agent per rung, or `--auto` lets Jev choose tier and agent count.
+- **Usage stats** — `sage stats` prints confidence histograms and apply rates per consumer, which is how you find out whether the gates are earning their latency.
+- **Health check** — `sage doctor` verifies the decision server, Ollama, and the agent server.
+- **Fan-out** — `sage spawn` runs one agent per rung, or `--auto` lets Jev choose tier and agent count.
 
 ## Install
 
@@ -172,9 +172,7 @@ cargo build --release --manifest-path rust/Cargo.toml
 ./rust/target/release/sage doctor   # health of judge / ollama / opencode
 ```
 
-The implementation is Rust (serde_json only, HTTP via `curl`). `python/sage.py` is kept as a
-reference implementation with identical scoring — useful for diffing output when changing
-the weights. It reads `~/.cache/opencode/models.json` (the OpenCode provider cache) and
+The implementation is Rust (serde_json only, HTTP via `curl`). It reads `~/.cache/opencode/models.json` (the OpenCode provider cache) and
 `ollama list`.
 
 Measured on this machine, full generation (40 models, five artifacts): **73 ms Rust** vs
