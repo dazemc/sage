@@ -3,8 +3,11 @@ tiers:
   cheap:
     model: glm-5.3-flash
     description: "Everyday edits and searches: small code changes, targeted greps, summaries"
+  standard:
+    model: gpt-5.6-luna
+    description: "Moderate engineering: several files, tests, debugging a clear failure"
   strong:
-    model: deepseek-v4-pro
+    model: glm-5.3
     description: "Hard engineering: multi-file refactors, architecture, ambiguous specs, debugging dead-ends"
   frontier:
     model: qwen3.8-max

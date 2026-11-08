@@ -341,58 +341,48 @@ fn table(models: &[Model]) -> String {
     out
 }
 
-const OPENCODE_LADDER: &[(&str, &str)] = &[
-    ("cheap", "glm-5.3-flash"),
-    ("strong", "deepseek-v4-pro"),
-    ("frontier", "qwen3.8-max"),
-];
+fn available(m: &Model, availability: &BTreeMap<String, bool>) -> bool {
+    availability.get(&m.id).copied().unwrap_or(true)
+}
 
-const OPENCLAW_LADDER: &[(&str, &str, &str)] = &[
-    ("local", "ollama", "qwen3:8b"),
-    ("cheap", "opencode-go", "glm-5.3-flash"),
-    ("strong", "opencode-go", "deepseek-v4-pro"),
-    ("frontier", "opencode-go", "qwen3.8-max"),
-];
+/// One rung per tier that has an available model: 0 local .. 5 frontier.
+fn build_ladders(
+    models: &[Model],
+    availability: &BTreeMap<String, bool>,
+) -> (Vec<(String, String)>, Vec<(String, String, String)>) {
+    let best_in = |tier: u8, local: bool| -> Option<&Model> {
+        models
+            .iter()
+            .filter(|m| m.tier == tier && m.local == local && available(m, availability))
+            .max_by(|a, b| a.score.partial_cmp(&b.score).unwrap())
+    };
+
+    let mut opencode = vec![];
+    for tier in 1..=5u8 {
+        if let Some(m) = best_in(tier, false) {
+            opencode.push((tier_name(tier).to_string(), m.id.split('/').last().unwrap_or(&m.id).to_string()));
+        }
+    }
+
+    let mut openclaw = vec![];
+    if let Some(m) = best_in(0, true) {
+        openclaw.push(("local".to_string(), m.provider.clone(), m.id.split('/').last().unwrap_or(&m.id).to_string()));
+    }
+    for (rung, model) in &opencode {
+        openclaw.push((rung.clone(), PROVIDER.to_string(), model.clone()));
+    }
+    (opencode, openclaw)
+}
 
 fn description(rung: &str) -> &'static str {
     match rung {
         "local" => "Trivial, mechanical steps with no ambiguity: greet, echo, single grep",
         "free" => "Simple single-tool work: read one file, answer a short question",
         "cheap" => "Everyday edits and searches: small code changes, targeted greps, summaries",
+        "standard" => "Moderate engineering: several files, tests, debugging a clear failure",
         "strong" => "Hard engineering: multi-file refactors, architecture, ambiguous specs, debugging dead-ends",
         _ => "Frontier reasoning: long-horizon autonomous work where a wrong answer is expensive",
     }
-}
-
-fn resolve_ladders(models: &[Model], availability: &BTreeMap<String, bool>) -> (Vec<(String, String)>, Vec<(String, String, String)>) {
-    let pick = |rung: &str, current: &str, provider: &str| -> Option<String> {
-        if availability.get(&format!("{provider}/{current}")).copied().unwrap_or(true) {
-            return Some(current.to_string());
-        }
-        models
-            .iter()
-            .filter(|m| !m.local && tier_name(m.tier) == rung)
-            .filter(|m| availability.get(&m.id).copied().unwrap_or(true))
-            .max_by(|a, b| a.score.partial_cmp(&b.score).unwrap())
-            .map(|m| m.id.split('/').last().unwrap_or(&m.id).to_string())
-    };
-    let oc = OPENCODE_LADDER
-        .iter()
-        .filter_map(|(rung, model)| pick(rung, model, PROVIDER).map(|m| (rung.to_string(), m)))
-        .collect();
-    let ow = OPENCLAW_LADDER
-        .iter()
-        .filter_map(|(rung, provider, model)| pick(rung, model, provider).map(|m| (rung.to_string(), m)))
-        .map(|(rung, model)| {
-            let provider = OPENCLAW_LADDER
-                .iter()
-                .find(|(r, _, _)| *r == rung)
-                .map(|(_, p, _)| p.to_string())
-                .unwrap_or_else(|| PROVIDER.to_string());
-            (rung, provider, model)
-        })
-        .collect();
-    (oc, ow)
 }
 
 fn jev_yaml_with(ladder: &[(String, String)]) -> String {
@@ -478,7 +468,7 @@ fn generate(root: &Path) -> Result<(), String> {
     write("models.json", serde_json::to_string_pretty(&models).unwrap() + "\n")?;
     write("RANKING.md", format!("# Sage model ranking\n\n{}\n", table(&models)))?;
     let availability = load_availability(root);
-    let (oc_ladder, ow_ladder) = resolve_ladders(&models, &availability);
+    let (oc_ladder, ow_ladder) = build_ladders(&models, &availability);
     write("tiers.yaml", jev_yaml_with(&oc_ladder))?;
     write("tiers.openclaw.json", openclaw_json_with(&ow_ladder))?;
     write("policy.json", policy(&models))?;
@@ -583,7 +573,12 @@ fn spawn(task: &str, tiers: &str, dry_run: bool) {
     }
     let mut children = vec![];
     for rung in picks {
-        let Some((_, model)) = OPENCODE_LADDER.iter().find(|(r, _)| *r == rung) else {
+        let bench = load_benchmarks(Path::new("."));
+        let mut all = load_local();
+        all.extend(load_hosted(Path::new(".")));
+        let ranked = rank(all, &bench);
+        let (ladder, _) = build_ladders(&ranked, &load_availability(Path::new(".")));
+        let Some((_, model)) = ladder.iter().find(|(r, _)| r == rung) else {
             println!("skip {rung}: not in ladder");
             continue;
         };
@@ -609,9 +604,8 @@ fn spawn(task: &str, tiers: &str, dry_run: bool) {
 }
 
 fn auto_plan(_task: &str) -> Vec<String> {
-    let criteria: serde_json::Map<String, Value> = OPENCLAW_LADDER
-        .iter()
-        .map(|(rung, _, _)| (rung.to_string(), json!(description(rung))))
+    let criteria: serde_json::Map<String, Value> = (0..=5u8)
+        .map(|tier| (tier_name(tier).to_string(), json!(description(tier_name(tier)))))
         .collect();
     let questions = json!({
         "tier": {"type": "choice", "instructions": "Which tier should handle this task?", "criteria": criteria},
@@ -634,7 +628,7 @@ fn auto_plan(_task: &str) -> Vec<String> {
         .and_then(|s| s.as_f64())
         .unwrap_or(0.0);
     let count = ((score.round() as i64) + 1).clamp(1, 4) as usize;
-    let order: Vec<&str> = OPENCLAW_LADDER.iter().map(|(r, _, _)| *r).collect();
+    let order: Vec<&str> = (0..=5u8).map(tier_name).collect();
     let start = order.iter().position(|r| *r == tier).unwrap_or(2);
     (0..count)
         .map(|i| order[(start + i).min(order.len() - 1)].to_string())
@@ -642,8 +636,8 @@ fn auto_plan(_task: &str) -> Vec<String> {
 }
 
 fn list_tiers() {
-    for (rung, _) in OPENCODE_LADDER {
-        println!("{rung}");
+    for tier in 0..=5u8 {
+        println!("{}", tier_name(tier));
     }
 }
 
@@ -768,7 +762,7 @@ fn apply() -> Result<(), String> {
     all.extend(load_hosted(Path::new(".")));
     let models = rank(all, &bench);
     let availability = load_availability(&std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
-    let (oc_ladder, ow_ladder) = resolve_ladders(&models, &availability);
+    let (oc_ladder, ow_ladder) = build_ladders(&models, &availability);
     let jev_path = home().join(".config/jev/config.yaml");
     let text = fs::read_to_string(&jev_path).map_err(|e| format!("{}: {e}", jev_path.display()))?;
     let head_src = match text.find("tiers:") {
@@ -808,7 +802,12 @@ fn probe(models_file: &str, limit: usize, all: bool) -> Result<(), String> {
     let targets: Vec<&Model> = if all {
         models.iter().collect()
     } else {
-        let ladder_models: Vec<&str> = OPENCODE_LADDER.iter().map(|(_, m)| *m).collect();
+        let bench = load_benchmarks(Path::new("."));
+        let mut all = load_local();
+        all.extend(load_hosted(Path::new(".")));
+        let ranked = rank(all, &bench);
+        let (ladder, _) = build_ladders(&ranked, &load_availability(Path::new(".")));
+        let ladder_models: Vec<String> = ladder.iter().map(|(_, m)| m.clone()).collect();
         models
             .iter()
             .filter(|m| ladder_models.iter().any(|name| m.id.ends_with(&format!("/{name}"))))
