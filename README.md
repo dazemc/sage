@@ -101,6 +101,16 @@ unavailable, the rung falls back to the highest-scoring available model in the s
 tier. Verified by forcing `qwen3.8-max` to `ok: false` — the frontier rung resolved
 to `kimi-k3` in both the generated ladder and the live configs.
 
+## Watch it work
+
+```sh
+sage watch
+```
+
+A live full-screen view of both consumers: decisions per minute, apply rate, and the
+last few decisions with their confidence. `q` quits. It reads the same logs `stats`
+does, so there is no daemon and nothing to enable — useful while a build is running.
+
 ## Shell completion
 
 ```sh

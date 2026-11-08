@@ -658,6 +658,7 @@ _sage() {
   local -a commands
   commands=(
     'stats:confidence histograms per consumer'
+    'watch:live monitor of both consumers'
     'doctor:health of judge, ollama and the agent server'
     'spawn:run one agent per tier'
     'list-tiers:print ladder rungs'
@@ -687,7 +688,7 @@ _sage
   local cur="${COMP_WORDS[COMP_CWORD]}"
   local prev="${COMP_WORDS[COMP_CWORD-1]}"
   if [[ $COMP_CWORD -eq 1 ]]; then
-    COMPREPLY=( $(compgen -W "stats doctor spawn list-tiers list-models completions" -- "$cur") )
+    COMPREPLY=( $(compgen -W "stats watch doctor spawn list-tiers list-models completions" -- "$cur") )
     return
   fi
   case "$prev" in
@@ -700,7 +701,7 @@ _sage
 complete -F _sage_complete sage
 "#;
     let fish = r#"complete -c sage -f
-complete -c sage -n '__fish_use_subcommand' -a 'stats doctor spawn list-tiers list-models completions'
+complete -c sage -n '__fish_use_subcommand' -a 'stats watch doctor spawn list-tiers list-models completions'
 complete -c sage -n '__fish_seen_subcommand_from completions' -a 'bash zsh fish'
 complete -c sage -n '__fish_seen_subcommand_from spawn' -l task -r
 complete -c sage -n '__fish_seen_subcommand_from spawn' -l tiers -r -a '(sage list-tiers)'
@@ -847,12 +848,80 @@ fn chrono_like() -> String {
     format!("{now}")
 }
 
+fn tail_lines(path: &str, limit: usize) -> Vec<String> {
+    let Ok(text) = fs::read_to_string(path) else {
+        return vec![];
+    };
+    let mut lines: Vec<String> = text
+        .lines()
+        .filter(|l| l.contains("apply:") || l.contains("bypass:") || l.contains("active:"))
+        .map(|l| l.to_string())
+        .collect();
+    if lines.len() > limit {
+        lines = lines.split_off(lines.len() - limit);
+    }
+    lines
+}
+
+fn watch() {
+    use std::io::{Read, Write};
+    use std::sync::mpsc;
+
+    let (tx, rx) = mpsc::channel::<u8>();
+    std::thread::spawn(move || {
+        let mut buf = [0u8; 1];
+        let mut stdin = std::io::stdin();
+        while let Ok(1) = stdin.read(&mut buf) {
+            let _ = tx.send(buf[0]);
+            if buf[0] == b'q' {
+                break;
+            }
+        }
+    });
+
+    let mut stdout = std::io::stdout();
+    loop {
+        if let Ok(key) = rx.try_recv() {
+            if key == b'q' || key == 3 {
+                break;
+            }
+        }
+        let router = tail_lines("/tmp/jev-router.log", 200);
+        let oc = tail_lines("/tmp/opencode-jev.log", 200);
+        let mut frame = String::new();
+        frame.push_str("\x1b[2J\x1b[H");
+        frame.push_str("\x1b[1mSage watch\x1b[0m   q to quit\n\n");
+        for (label, lines) in [("opencode", &oc), ("OpenClaw", &router)] {
+            let decisions: Vec<&String> = lines.iter().filter(|l| l.contains("apply:") || l.contains("bypass:")).collect();
+            let applied = decisions.iter().filter(|l| l.contains("apply:")).count();
+            let rate = if decisions.is_empty() { 0.0 } else { applied as f64 / decisions.len() as f64 * 100.0 };
+            frame.push_str(&format!(
+                "\x1b[1m{label}\x1b[0m  {} decisions  {} applied  {:.0}%\n",
+                decisions.len(), applied, rate
+            ));
+            for line in decisions.iter().rev().take(5) {
+                let trimmed = line.trim();
+                let body = trimmed.split_once("] ").map(|(_, b)| b).unwrap_or(trimmed);
+                let colour = if body.contains("apply:") { "\x1b[32m" } else { "\x1b[90m" };
+                frame.push_str(&format!("  {colour}{}\x1b[0m\n", &body[..body.len().min(150)]));
+            }
+            frame.push('\n');
+        }
+        frame.push_str("\x1b[90mlogs: /tmp/opencode-jev.log  /tmp/jev-router.log\x1b[0m\n");
+        let _ = stdout.write_all(frame.as_bytes());
+        let _ = stdout.flush();
+        std::thread::sleep(std::time::Duration::from_secs(1));
+    }
+    let _ = stdout.write_all(b"\x1b[0m\n");
+}
+
 fn main() {
     let root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let args: Vec<String> = std::env::args().collect();
     let cmd = args.get(1).map(|s| s.as_str()).unwrap_or("");
     match cmd {
         "stats" => stats(),
+        "watch" => watch(),
         "probe" => {
             let mut file = "models.json".to_string();
             let mut limit = 8usize;
