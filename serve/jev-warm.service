@@ -1,0 +1,6 @@
+[Unit]
+Description=Re-pin the OpenJev decision model in Ollama VRAM
+
+[Service]
+Type=oneshot
+ExecStart=/home/daze/.local/share/openjev/warm.sh

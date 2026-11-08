@@ -22,6 +22,33 @@ Easy steps stay free or near-free; hard steps climb the ladder automatically.
 
 ---
 
+## What's in the box
+
+Sage is one tool with four parts that used to live in separate repos:
+
+| path | role |
+|---|---|
+| `rust/` | the CLI: ranking, ladders, `apply`, `stats`, `doctor`, `spawn`, completions |
+| `serve/` | the local decision server: `front.py` (model discovery + strict response shaping), `serve.sh`, keepalive units |
+| `opencode-plugin/` | the OpenCode fork: per-request tool trim + model tier |
+| `openclaw-plugin/` | `jev-router`: per-turn model tier via `before_model_resolve` |
+
+One command surface:
+
+```sh
+sage                  # regenerate models.json, RANKING.md, tiers.*, policy.json
+sage apply            # write the ladder into the live configs (idempotent)
+sage stats            # confidence histograms + apply rate per consumer
+sage doctor           # judge / ollama / agent server health
+sage spawn --auto ... # fan out across tiers
+sage completions zsh --install
+```
+
+`apply` is the piece that closes the drift gap: generation alone rewrites the repo
+artifacts, while `apply` patches `~/.config/jev/config.yaml` and the OpenClaw
+`jev-router` entry in place, preserving every other key. Running it twice is a
+no-op (byte-identical), so it is safe in a cron or a pre-flight check.
+
 ## Why a ladder instead of one "best" model
 
 Cost and capability are not linear. On a real workload most steps are mechanical: read a file, grep a symbol, apply a known edit. Paying frontier prices for those is waste. Occasionally a step is genuinely hard — a multi-file refactor, an ambiguous spec, a debugging dead-end — and a cheap model will flail, costing more in retries than the upgrade would have.

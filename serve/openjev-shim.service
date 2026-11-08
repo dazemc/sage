@@ -1,0 +1,21 @@
+[Unit]
+Description=OpenJev local decision server (shim over Ollama, /v1/systemone)
+After=network.target
+
+[Service]
+Type=simple
+Environment=VLLM=http://127.0.0.1:11434/v1
+Environment=TOKENIZER=/home/daze/.local/share/openjev/tokenizer
+Environment=READOUT_T=0.85
+Environment=READOUT_NOUL_T=1.829074
+Environment=READOUT_NOUL_BIAS=0
+Environment=READOUT_TARGETED=0
+Environment=READOUT_INSTR_STYLE=pyrepr
+Environment=SHIM_STAGGER=1
+Environment=OPENJEV_LOG=/tmp/openjev-decisions.log
+ExecStart=/home/daze/.local/share/openjev/serve.sh
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

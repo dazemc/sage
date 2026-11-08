@@ -1,0 +1,57 @@
+{
+  "name": "@danipl/opencode-jev",
+  "version": "1.2.0",
+  "description": "Route OpenCode tool selection through TypeSafe System-1 (Jev): a cheap fast model picks the next tool so the reasoning model executes instead of deliberating.",
+  "keywords": [
+    "opencode-plugin",
+    "opencode",
+    "jev",
+    "typesafe",
+    "tool-routing",
+    "system-1"
+  ],
+  "license": "MIT",
+  "author": "danipl",
+  "type": "module",
+  "main": "./dist/index.js",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "index.js",
+    "README.md",
+    "LICENSE",
+    "jev.yaml.example"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/danipl/opencode-jev.git"
+  },
+  "homepage": "https://github.com/danipl/opencode-jev#readme",
+  "bugs": {
+    "url": "https://github.com/danipl/opencode-jev/issues"
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test test/index.test.ts",
+    "prepublishOnly": "npm run build"
+  },
+  "dependencies": {
+    "yaml": "^2.9.1"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "openclaw": {
+    "devDependenciesRemovedForGitInstall": [
+      "@opencode/plugin",
+      "@types/bun",
+      "typescript"
+    ]
+  }
+}

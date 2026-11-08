@@ -1,0 +1,10 @@
+[Unit]
+Description=Keep the OpenJev decision model resident
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+Unit=jev-warm.service
+
+[Install]
+WantedBy=timers.target
