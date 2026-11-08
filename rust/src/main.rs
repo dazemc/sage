@@ -324,7 +324,6 @@ fn table(models: &[Model]) -> String {
 }
 
 const OPENCODE_LADDER: &[(&str, &str)] = &[
-    ("free", "ox-alpha-free"),
     ("cheap", "glm-5.3-flash"),
     ("strong", "deepseek-v4-pro"),
     ("frontier", "qwen3.8-max"),
@@ -332,7 +331,6 @@ const OPENCODE_LADDER: &[(&str, &str)] = &[
 
 const OPENCLAW_LADDER: &[(&str, &str, &str)] = &[
     ("local", "ollama", "qwen3:8b"),
-    ("free", "opencode-go", "ox-alpha-free"),
     ("cheap", "opencode-go", "glm-5.3-flash"),
     ("strong", "opencode-go", "deepseek-v4-pro"),
     ("frontier", "opencode-go", "qwen3.8-max"),

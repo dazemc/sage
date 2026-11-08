@@ -5,11 +5,6 @@
       "model": "glm-5.3-flash",
       "provider": "opencode-go"
     },
-    "free": {
-      "description": "Simple single-tool work: read one file, answer a short question",
-      "model": "ox-alpha-free",
-      "provider": "opencode-go"
-    },
     "frontier": {
       "description": "Frontier reasoning: long-horizon autonomous work where a wrong answer is expensive",
       "model": "qwen3.8-max",
