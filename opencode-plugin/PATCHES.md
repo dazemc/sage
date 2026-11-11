@@ -11,6 +11,8 @@ silently deletes the following, all of which are live in production:
 | Responses-API `input` history support | yes | partial |
 | `historyLen` established-session guard | yes | **no** |
 | composite-reasoning-id drop | yes | yes (unbuilt) |
+| `mutated` flag so sanitised history is written back | yes | yes |
+| charset-based invalid-id repair (not just `:`) | yes | yes |
 
 ## Before any rebuild
 
@@ -34,3 +36,24 @@ port `index.ts` up to parity first. `dist/` is committed to git, so
    Note: the remaining `--fork` failure
    (`Expected an ID that begins with 'msg'`) is **opencode's own bug** — it
    reproduces with this plugin fully disabled, so it cannot be fixed here.
+
+## Bug 3 (found 2026-11-11): the sanitisation was thrown away
+
+`routePayload` sanitised history, then returned `false` whenever no tool
+decision fired — and `handleRequest` only rewrites the body when the return is
+truthy: `rebuildRequest(request, forced ? JSON.stringify(payload) : text)`.
+So every `bypass:` turn shipped the **original, poisoned** body. The log said
+`dropped 393 history item(s)` while the request still carried `rs_a:rs_b`,
+which is exactly why the session stayed broken after the first fix.
+
+Two changes:
+
+1. `routePayload` now carries a `mutated` flag set by history sanitisation and
+   returns `changed || mutated`, so a sanitised payload is always written back.
+2. Invalid-id detection tests the charset the Responses API actually accepts
+   (`/^[A-Za-z0-9_-]+$/`) instead of just `:`. Reasoning items with a bad id are
+   dropped; any *other* item with a bad id keeps its content and only loses the
+   id (`id` is a correlation key, not payload).
+
+Verified: pre-patch build sends `rs_a:rs_b` on the wire; patched build does not.
+Real repro (`opencode run --fork --model opencode-go/gpt-6-luna`) now answers.

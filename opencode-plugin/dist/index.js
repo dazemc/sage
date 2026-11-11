@@ -519,6 +519,11 @@ function pickRung(tiers, tier) {
 /* --------------------------------------------------- interception core */
 async function routePayload(cfg, target, payload, sessionId) {
     const names = toolNames(payload.tools);
+    // `mutated` tracks history sanitisation independently of the routing
+    // decision. The caller only rewrites the request body when this returns
+    // truthy, so a sanitised-but-unrouted payload used to be silently
+    // discarded and the original (poisoned) body was sent anyway.
+    let mutated = false;
     // opencode rejects historical reasoning_details when the model changes
     // protocol. The field is optional for replay, so drop it from history on
     // every routed request; the current turn's reasoning is unaffected.
@@ -534,6 +539,7 @@ async function routePayload(cfg, target, payload, sessionId) {
         if (message && typeof message === "object" && "reasoning_details" in message) {
             delete message.reasoning_details;
             stripped += 1;
+            mutated = true;
         }
     }
     if (stripped > 0) {
@@ -544,30 +550,50 @@ async function routePayload(cfg, target, payload, sessionId) {
     // outright: "Expected an ID that contains letters, numbers, underscores, or
     // dashes". The id is only a local correlation key for replay, so drop the
     // reasoning items carrying one and let the model continue without them.
+    // The Responses API only accepts [A-Za-z0-9_-] in item ids. Testing the
+    // charset (rather than just ":") also catches the other separators opencode
+    // emits when it merges reasoning items across a fork.
+    const VALID_ITEM_ID = /^[A-Za-z0-9_-]+$/;
     let droppedComposite = 0;
+    let repairedIds = 0;
     for (const item of history) {
         if (!item || typeof item !== "object") continue;
-        if (typeof item.id === "string" && item.id.includes(":")) {
+        if (typeof item.id !== "string" || item.id.length === 0 || VALID_ITEM_ID.test(item.id))
+            continue;
+        if (item.type === "reasoning") {
+            // Reasoning items are pure replay metadata: drop them entirely.
             item.__jevComposite = true;
             droppedComposite += 1;
         }
+        else {
+            // Anything else (messages, tool output) carries real content. Its id
+            // is only a correlation key, so drop the id and keep the item.
+            delete item.id;
+            repairedIds += 1;
+        }
+    }
+    if (repairedIds > 0) {
+        mutated = true;
+        log(`repaired ${repairedIds} history item(s) with invalid ids (id removed, content kept)`);
     }
     if (droppedComposite > 0 && Array.isArray(payload.input)) {
         payload.input = payload.input.filter((item) => !item || !item.__jevComposite);
+        mutated = true;
         log(`dropped ${droppedComposite} history item(s) with composite reasoning ids`);
     } else if (droppedComposite > 0 && Array.isArray(payload.messages)) {
         payload.messages = payload.messages.filter((item) => !item || !item.__jevComposite);
+        mutated = true;
         log(`dropped ${droppedComposite} history message(s) with composite reasoning ids`);
     }
     // No usable candidate, or a lone candidate: trimming can only reproduce the
     // original tools array — built-ins always pass through untouched — so there
     // is no decision for Jev and the round-trip would be pure added latency.
     if (names.length <= 1) {
-        return false;
+        return mutated;
     }
     // Invalid key latched earlier: skip the round-trip, zero added latency.
     if (jevAuthFailed)
-        return false;
+        return mutated;
     // A thrown round-trip (fetch network error, timeout abort, non-JSON body)
     // must still end in the tagged "bypass:" line — log contract §5.
     let answer;
@@ -579,7 +605,7 @@ async function routePayload(cfg, target, payload, sessionId) {
     }
     if (!answer) {
         log("bypass: jev unavailable (see preceding 'jev ...' error line) — full tool list sent untouched");
-        return false;
+        return mutated;
     }
     // Model tier is an independent question answered in the same round-trip:
     // it stays useful even when the tool decision is below threshold.
@@ -653,15 +679,15 @@ async function routePayload(cfg, target, payload, sessionId) {
     const at = `${answer.choice}@${answer.confidence}`;
     if (answer.choice === "respond_to_user") {
         log(`bypass: jev says answer directly (${at}) — nothing to trim to, full tool list sent untouched`);
-        return changed;
+        return changed || mutated;
     }
     if (!names.includes(answer.choice)) {
         log(`bypass: jev choice ${at} is not among this request's tools — full tool list sent untouched`);
-        return changed;
+        return changed || mutated;
     }
     if (answer.confidence < cfg.minConfidence) {
         log(`bypass: jev choice ${at} below minConfidence ${cfg.minConfidence} — full tool list sent untouched`);
-        return changed;
+        return changed || mutated;
     }
     // Force by trimming the candidate set to the chosen tool instead of pinning
     // via tool_choice: providers reject forced tool_choice in thinking mode
@@ -680,7 +706,7 @@ async function routePayload(cfg, target, payload, sessionId) {
     });
     if (tools.length === 0) {
         log(`bypass: jev choice ${at} listed but missing from payload — full tool list sent untouched`);
-        return changed;
+        return changed || mutated;
     }
     payload.tools = tools;
     changed = true;
@@ -688,7 +714,7 @@ async function routePayload(cfg, target, payload, sessionId) {
     log(`apply: tools trimmed to ${answer.choice}${keptBuiltIns
         ? ` (+ ${keptBuiltIns} built-in${keptBuiltIns === 1 ? "" : "s"} kept)`
         : " only"} (${at} >= minConfidence ${cfg.minConfidence})`);
-    return changed;
+    return changed || mutated;
 }
 function eligible(payload) {
     if (!Array.isArray(payload.tools) || payload.tools.length === 0)

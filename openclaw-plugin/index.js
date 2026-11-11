@@ -49,11 +49,16 @@ export default definePluginEntry({
 
     api.on(
       "before_model_resolve",
-      async (event) => {
+      async (event, hookCtx) => {
         const cfg = readConfig();
         if (cfg.tiers.length === 0) return undefined;
         const prompt = typeof event?.prompt === "string" ? event.prompt : "";
         if (prompt.trim().length < 24) return undefined;
+        // The model this turn would otherwise use. Without it `apply:` cannot
+        // tell a real switch from re-picking the model already in place, which
+        // is what made the log read "X -> X" hundreds of times.
+        const currentModel =
+          typeof hookCtx?.modelId === "string" ? hookCtx.modelId : undefined;
 
         const criteria = Object.fromEntries(cfg.tiers.map((tier) => [tier.name, tier.description]));
         const body = JSON.stringify({
@@ -89,12 +94,13 @@ export default definePluginEntry({
           const confidence = Number(answer.confidence);
           const ordered = [...cfg.tiers].sort((a, b) => (a.rank ?? 0) - (b.rank ?? 0));
           if (ordered.length === 0) return undefined;
-          // 20 ways to split the mass means a decisive answer sits near 0.27, so a
-          // fixed 0.35 threshold would never fire. Gate at 50% above uniform, then
-          // take the expected rung from the whole distribution.
-          const gate = 1.5 / ordered.length;
+          // `tierMinConfidence` was declared in DEFAULTS and set in config but
+          // never read, so the effective gate was 1.5/N — 0.15 for a ten-rung
+          // ladder. Almost any answer cleared it and the ladder re-routed on
+          // noise. Honour the configured value.
+          const gate = cfg.tierMinConfidence;
           if (!Number.isFinite(confidence) || confidence < gate) {
-            log(cfg, `bypass: ${answer.choice}@${confidence} < gate ${gate.toFixed(3)}`);
+            log(cfg, `bypass: ${answer.choice}@${confidence} < tierMinConfidence ${gate}`);
             return undefined;
           }
           let index = Math.floor((confidence - gate) / 0.05);
@@ -118,7 +124,14 @@ export default definePluginEntry({
           }
           const tier = ordered[Math.max(0, Math.min(ordered.length - 1, index))];
           if (!tier) return undefined;
-          log(cfg, `apply: ${tier.name} -> ${tier.model} (${why})`);
+          if (currentModel !== undefined && tier.model === currentModel) {
+            log(cfg, `keep: ${tier.name} already in place (${why})`);
+            return undefined;
+          }
+          // Log the model actually being replaced. Printing `tier.name` twice
+          // produced lines that read "X -> X" and looked like a broken no-op.
+          const from = currentModel ?? "current";
+          log(cfg, `apply: ${from} -> ${tier.model} [${tier.name}] (${why})`);
           return {
             modelOverride: tier.model,
             ...(tier.provider ? { providerOverride: tier.provider } : {}),

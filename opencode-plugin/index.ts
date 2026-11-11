@@ -596,6 +596,10 @@ function sanitizeHistory(payload: Record<string, unknown>): boolean {
   let changed = false;
   let stripped = 0;
   let droppedComposite = 0;
+  // The Responses API only accepts [A-Za-z0-9_-] in item ids. Testing the
+  // charset (rather than just ":") also catches the other separators opencode
+  // emits when it merges reasoning items across a fork.
+  const VALID_ITEM_ID = /^[A-Za-z0-9_-]+$/;
   const cleaned = history.filter((item) => {
     if (typeof item !== "object" || item === null) return true;
     const record = item as Record<string, unknown>;
@@ -605,9 +609,9 @@ function sanitizeHistory(payload: Record<string, unknown>): boolean {
       stripped += 1;
     }
     if (
-      record.type === "reasoning" &&
       typeof record.id === "string" &&
-      record.id.includes(":")
+      record.id.length > 0 &&
+      !VALID_ITEM_ID.test(record.id)
     ) {
       changed = true;
       droppedComposite += 1;
