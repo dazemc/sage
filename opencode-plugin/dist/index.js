@@ -8,6 +8,10 @@ const DEFAULT_API_URL = "https://api.typesafe.ai/v1/systemone";
 const DEFAULT_MIN_CONFIDENCE = 0.75;
 const DEFAULT_TIMEOUT_MS = 2000;
 const DEFAULT_MODEL = "jev-latest";
+// Sticky per-session model choice: switching models mid-session invalidates
+// opencode's provider metadata and breaks stateful assistant history.
+const SESSION_TTL_MS = 2 * 60 * 60 * 1000;
+const sessionPicks = new Map();
 // Snapshot budgets. Empirically, long state dilutes the decision: on the same
 // question, 9 ledger entries scored 0.535 confidence where 3 entries scored
 // 0.886. Short and recent beats long and complete.
@@ -513,8 +517,21 @@ function pickRung(tiers, tier) {
 }
 
 /* --------------------------------------------------- interception core */
-async function routePayload(cfg, target, payload) {
+async function routePayload(cfg, target, payload, sessionId) {
     const names = toolNames(payload.tools);
+    // opencode rejects historical reasoning_details when the model changes
+    // protocol. The field is optional for replay, so drop it from history on
+    // every routed request; the current turn's reasoning is unaffected.
+    let stripped = 0;
+    for (const message of Array.isArray(payload.messages) ? payload.messages : []) {
+        if (message && typeof message === "object" && "reasoning_details" in message) {
+            delete message.reasoning_details;
+            stripped += 1;
+        }
+    }
+    if (stripped > 0) {
+        log(`stripped reasoning_details from ${stripped} history message(s)`);
+    }
     // No usable candidate, or a lone candidate: trimming can only reproduce the
     // original tools array — built-ins always pass through untouched — so there
     // is no decision for Jev and the round-trip would be pure added latency.
@@ -541,12 +558,56 @@ async function routePayload(cfg, target, payload) {
     // it stays useful even when the tool decision is below threshold.
     let changed = false;
     if (answer.tier) {
-        const pick = pickRung(cfg.tiers, answer.tier);
         const current = typeof payload.model === "string" ? payload.model : undefined;
-        if (pick.rung && current !== undefined && current !== pick.rung.model) {
-            payload.model = pick.rung.model;
-            changed = true;
-            log(`apply: model ${current} -> ${pick.rung.model} (${pick.why})`);
+        const now = Date.now();
+        let sticky = sessionId ? sessionPicks.get(sessionId) : undefined;
+        if (sticky && now - sticky.at > SESSION_TTL_MS) {
+            sessionPicks.delete(sessionId);
+            sticky = undefined;
+        }
+        if (sticky && current !== sticky.baseModel) {
+            // User changed the session model explicitly; decide again from the new base.
+            sessionPicks.delete(sessionId);
+            sticky = undefined;
+        }
+        if (sticky) {
+            if (current !== undefined && current !== sticky.model) {
+                payload.model = sticky.model;
+                changed = true;
+                log(`sticky: model ${current} -> ${sticky.model} (session ${sessionId})`);
+            }
+        } else {
+            const historyLen = Array.isArray(payload.messages) ? payload.messages.length : 0;
+            if (current !== undefined && historyLen > 2) {
+                // Never switch an established session: opencode stores provider
+                // metadata per message and a late switch breaks history replay.
+                if (sessionId) {
+                    sessionPicks.set(sessionId, { baseModel: current, model: current, at: now });
+                }
+                log(`bypass: existing history (${historyLen} messages) — model ${current} kept`);
+            } else {
+                const pick = pickRung(cfg.tiers, answer.tier);
+                if (pick.rung && current !== undefined && answer.tier.confidence >= cfg.tierMinConfidence) {
+                    if (current !== pick.rung.model) {
+                        // Drop provider-specific reasoning metadata so the new model can
+                        // replay the history without a protocol mismatch.
+                        for (const message of Array.isArray(payload.messages) ? payload.messages : []) {
+                            if (message && typeof message === "object") {
+                                delete message.reasoning_details;
+                                delete message.provider_metadata;
+                            }
+                        }
+                        payload.model = pick.rung.model;
+                        changed = true;
+                        log(`apply: model ${current} -> ${pick.rung.model} (${pick.why}, session ${sessionId ?? "unknown"})`);
+                    }
+                    if (sessionId) {
+                        sessionPicks.set(sessionId, { baseModel: current, model: pick.rung.model, at: now });
+                    }
+                } else if (pick.rung) {
+                    log(`bypass: tier ${pick.rung.name} p1 ${answer.tier.confidence} below tierMinConfidence ${cfg.tierMinConfidence}`);
+                }
+            }
         }
     }
     const at = `${answer.choice}@${answer.confidence}`;
@@ -628,7 +689,8 @@ async function handleRequest(cfg, request) {
     try {
         const payload = JSON.parse(text);
         if (payload && typeof payload === "object" && eligible(payload)) {
-            const forced = await routePayload(cfg, target, payload);
+            const sessionId = request.headers.get("x-opencode-session-id") ?? request.headers.get("x-opencode-session") ?? undefined;
+            const forced = await routePayload(cfg, target, payload, sessionId);
             return rebuildRequest(request, forced ? JSON.stringify(payload) : text);
         }
     }

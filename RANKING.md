@@ -2,23 +2,23 @@
 
 | rank | tier | model | score | perf | price | tokens | $/M in | $/M out | ctx |
 |---|---|---|---|---|---|---|---|---|---|
-| 1 | 2 cheap | `opencode-go/gpt-6-luna` | 90.6 | 97.0 | 69.4 | 100.0 | 0.1 | 0.5 | 1050000 |
-| 2 | 1 free | `opencode-go/minimax-m3.1-flash-free` | 85.6 | 76.0 | 100.0 | 100.0 | 0 | 0 | 1000000 |
-| 3 | 1 free | `opencode-go/step-5-preview-free` | 84.4 | 74.0 | 100.0 | 100.0 | 0 | 0 | 1000000 |
-| 4 | 1 free | `opencode-go/longcat-2.5-preview-free` | 83.2 | 72.0 | 100.0 | 100.0 | 0 | 0 | 1000000 |
-| 5 | 2 cheap | `opencode-go/mimo-v2.6-flash` | 82.5 | 82.0 | 73.3 | 100.0 | 0.14 | 0.28 | 1048576 |
-| 6 | 3 standard | `opencode-go/gpt-5.6-luna` | 77.9 | 84.0 | 50.0 | 100.0 | 0.2 | 1.2 | 1050000 |
-| 7 | 2 cheap | `opencode-go/minimax-m3.1-flash` | 76.5 | 76.0 | 63.7 | 100.0 | 0.15 | 0.6 | 1000000 |
-| 8 | 3 standard | `opencode-go/mimo-v2.6-pro` | 75.9 | 82.0 | 46.9 | 100.0 | 0.435 | 0.87 | 1048576 |
-| 9 | 3 standard | `opencode-go/deepseek-v4-pro` | 74.0 | 85.0 | 32.1 | 100.0 | 0.66 | 1.98 | 1000000 |
-| 10 | 5 frontier | `opencode-go/kimi-k3.1-pro` | 73.4 | 93.0 | 10.2 | 100.0 | 2 | 10 | 1048576 |
-| 11 | 2 cheap | `opencode-go/glm-5.3-flash` | 73.0 | 69.0 | 66.2 | 100.0 | 0.15 | 0.5 | 1000000 |
-| 12 | 2 cheap | `opencode-go/deepseek-v4.1-flash` | 72.9 | 70.0 | 63.7 | 100.0 | 0.15 | 0.6 | 1000000 |
-| 13 | 2 cheap | `opencode-go/muse-spark-1.3-contributor` | 72.6 | 63.0 | 79.4 | 100.0 | 0.1 | 0.2 | 1048576 |
-| 14 | 2 cheap | `opencode-go/qwen3.8-flash` | 72.6 | 68.0 | 67.0 | 100.0 | 0.15 | 0.47 | 1000000 |
-| 15 | 5 frontier | `opencode-go/qwen3.8-max` | 72.4 | 90.0 | 13.5 | 100.0 | 2 | 6 | 1000000 |
-| 16 | 3 standard | `opencode-go/minimax-m3` | 72.3 | 76.0 | 46.7 | 100.0 | 0.3 | 1.2 | 1000000 |
-| 17 | 2 cheap | `opencode-go/claude-haiku-5-5` | 72.0 | 66.0 | 69.4 | 100.0 | 0.1 | 0.5 | 1000000 |
+| 1 | 1 free | `opencode-go/step-5-preview-free` | 84.4 | 74.0 | 100.0 | 100.0 | 0 | 0 | 1000000 |
+| 2 | 1 free | `opencode-go/longcat-2.5-preview-free` | 83.2 | 72.0 | 100.0 | 100.0 | 0 | 0 | 1000000 |
+| 3 | 2 cheap | `opencode-go/gpt-6-luna` | 82.8 | 84.0 | 69.4 | 100.0 | 0.1 | 0.5 | 1050000 |
+| 4 | 1 free | `opencode-go/minimax-m3.1-flash-free` | 82.0 | 70.0 | 100.0 | 100.0 | 0 | 0 | 1000000 |
+| 5 | 3 standard | `opencode-go/gpt-5.6-luna` | 77.9 | 84.0 | 50.0 | 100.0 | 0.2 | 1.2 | 1050000 |
+| 6 | 3 standard | `opencode-go/mimo-v2.6-pro` | 75.9 | 82.0 | 46.9 | 100.0 | 0.435 | 0.87 | 1048576 |
+| 7 | 3 standard | `opencode-go/deepseek-v4-pro` | 74.0 | 85.0 | 32.1 | 100.0 | 0.66 | 1.98 | 1000000 |
+| 8 | 5 frontier | `opencode-go/kimi-k3.1-pro` | 73.4 | 93.0 | 10.2 | 100.0 | 2 | 10 | 1048576 |
+| 9 | 2 cheap | `opencode-go/glm-5.3-flash` | 73.0 | 69.0 | 66.2 | 100.0 | 0.15 | 0.5 | 1000000 |
+| 10 | 2 cheap | `opencode-go/deepseek-v4.1-flash` | 72.9 | 70.0 | 63.7 | 100.0 | 0.15 | 0.6 | 1000000 |
+| 11 | 2 cheap | `opencode-go/minimax-m3.1-flash` | 72.9 | 70.0 | 63.7 | 100.0 | 0.15 | 0.6 | 1000000 |
+| 12 | 2 cheap | `opencode-go/muse-spark-1.3-contributor` | 72.6 | 63.0 | 79.4 | 100.0 | 0.1 | 0.2 | 1048576 |
+| 13 | 2 cheap | `opencode-go/qwen3.8-flash` | 72.6 | 68.0 | 67.0 | 100.0 | 0.15 | 0.47 | 1000000 |
+| 14 | 5 frontier | `opencode-go/qwen3.8-max` | 72.4 | 90.0 | 13.5 | 100.0 | 2 | 6 | 1000000 |
+| 15 | 3 standard | `opencode-go/minimax-m3` | 72.3 | 76.0 | 46.7 | 100.0 | 0.3 | 1.2 | 1000000 |
+| 16 | 2 cheap | `opencode-go/claude-haiku-5-5` | 72.0 | 66.0 | 69.4 | 100.0 | 0.1 | 0.5 | 1000000 |
+| 17 | 2 cheap | `opencode-go/mimo-v2.6-flash` | 71.7 | 64.0 | 73.3 | 100.0 | 0.14 | 0.28 | 1048576 |
 | 18 | 5 frontier | `opencode-go/gemini-4-argon` | 71.6 | 90.0 | 10.2 | 100.0 | 2 | 10 | 1048576 |
 | 19 | 5 frontier | `opencode-go/kimi-k3` | 71.4 | 91.0 | 7.0 | 100.0 | 3 | 15 | 1048576 |
 | 20 | 2 cheap | `opencode-go/muse-spark-1.2-contributor` | 71.4 | 61.0 | 79.4 | 100.0 | 0.1 | 0.2 | 1048576 |
@@ -43,6 +43,7 @@
 | 39 | 1 free | `opencode-go/crouton-alpha-free` | 53.8 | 23.0 | 100.0 | 100.0 | 0 | 0 | 1048576 |
 | 40 | 1 free | `opencode-go/beam-free` | 52.6 | 21.0 | 100.0 | 100.0 | 0 | 0 | 1048576 |
 | 41 | 1 free | `opencode-go/cat-jam-free` | 52.6 | 21.0 | 100.0 | 100.0 | 0 | 0 | 1048576 |
-| 42 | 2 cheap | `opencode-go/space-bunny` | 46.3 | 25.6 | 63.7 | 100.0 | 0.15 | 0.6 | 1048576 |
-| 43 | 1 free | `opencode-go/iceman-contributor-free` | 41.5 | 21.0 | 100.0 | 26.2 | 0 | 0 | 262144 |
+| 42 | 0 local | `ollama/nomic-embed-text:latest` local | 51.6 | 30.6 | 100.0 | 55.0 | 0 | 0 | — |
+| 43 | 2 cheap | `opencode-go/space-bunny` | 46.3 | 25.6 | 63.7 | 100.0 | 0.15 | 0.6 | 1048576 |
+| 44 | 1 free | `opencode-go/iceman-contributor-free` | 41.5 | 21.0 | 100.0 | 26.2 | 0 | 0 | 262144 |
 

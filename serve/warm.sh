@@ -1,7 +1,14 @@
 #!/usr/bin/env bash
-# Re-pin the decision model so routing never pays a cold load.
+# Warm the OpenJev decision model now, for a bounded time.
+# Ollama is socket-activated and idle-exits, so this is opt-in: run it before a
+# burst of routing (e.g. a long agent session) and the first decision is fast.
 set -u
-curl -sf --max-time 120 http://127.0.0.1:11434/api/generate \
+
+MODEL="${OPENJEV_OLLAMA_MODEL:-qwen}"
+OLLAMA="${OLLAMA_URL:-http://127.0.0.1:11434}"
+KEEP="${OPENJEV_KEEP:-5m}"
+
+curl -sf --max-time 120 "$OLLAMA/api/generate" \
   -H 'Content-Type: application/json' \
-  -d '{"model":"qwen","prompt":"","stream":false,"keep_alive":-1,"options":{"num_predict":1}}' \
-  -o /dev/null
+  -d "{\"model\":\"$MODEL\",\"prompt\":\"\",\"stream\":false,\"keep_alive\":\"$KEEP\",\"options\":{\"num_predict\":1}}" \
+  -o /dev/null && echo "openjev: $MODEL warmed for $KEEP"

@@ -11,17 +11,17 @@
   "tiers": {
     "cheap": {
       "fallbacks": [
-        "opencode-go/mimo-v2.6-flash",
-        "opencode-go/minimax-m3.1-flash"
+        "opencode-go/glm-5.3-flash",
+        "opencode-go/deepseek-v4.1-flash"
       ],
       "primary": "opencode-go/gpt-6-luna"
     },
     "free": {
       "fallbacks": [
-        "opencode-go/step-5-preview-free",
-        "opencode-go/longcat-2.5-preview-free"
+        "opencode-go/longcat-2.5-preview-free",
+        "opencode-go/minimax-m3.1-flash-free"
       ],
-      "primary": "opencode-go/minimax-m3.1-flash-free"
+      "primary": "opencode-go/step-5-preview-free"
     },
     "frontier": {
       "fallbacks": [

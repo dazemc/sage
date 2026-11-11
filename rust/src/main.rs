@@ -594,6 +594,28 @@ fn build_ladders(
         .iter()
         .filter(|m| !m.local && available(m, availability) && !retired.contains_key(&m.id))
         .collect();
+    // Pareto prune: a model that is both weaker and strictly more expensive on
+    // input than another available model is never worth a rung. Equal input
+    // price is NOT dominance: it keeps distinct output-price tradeoffs (e.g. a
+    // cheap-output model beside a stronger same-input model).
+    let mut keep = vec![true; hosted.len()];
+    for i in 0..hosted.len() {
+        for j in 0..hosted.len() {
+            if i != j
+                && hosted[j].capability > hosted[i].capability
+                && hosted[j].cost_input < hosted[i].cost_input
+            {
+                keep[i] = false;
+                break;
+            }
+        }
+    }
+    let mut hosted: Vec<&Model> = hosted
+        .into_iter()
+        .enumerate()
+        .filter(|(i, _)| keep[*i])
+        .map(|(_, m)| m)
+        .collect();
     // Price leads the ramp: the ladder is what you pay per step, so a $2 frontier
     // model belongs near the top even if a $0.10 model scores close to it. Within
     // the same price the weaker model comes first, so the ramp still climbs.
@@ -620,12 +642,24 @@ fn build_ladders(
         hosted.clone()
     };
     // The default model is where every session starts, so it must be a rung or
-    // the judge cannot see the price it is already paying.
+    // the judge cannot see the price it is already paying. `selected` is an even
+    // sample of `hosted`, so a hosted index does not translate one-to-one into a
+    // selected index — inserting at the hosted position skewed the default down
+    // the ramp (a $0.22 default once landed below a $0.26 model). Insert where
+    // the default's blended price fits, mirroring the sort above.
     if let Some(want) = default_name {
         if !selected.iter().any(|m| rung_name(m) == want) {
             if let Some(m) = hosted.iter().find(|m| rung_name(m) == want) {
-                let insert_at = hosted.iter().position(|h| std::ptr::eq(*h, *m)).unwrap_or(0);
-                selected.insert(insert_at.min(selected.len()), m);
+                let bm = blended(m);
+                let cap = m.capability;
+                let insert_at = selected
+                    .iter()
+                    .position(|s| {
+                        let b = blended(s);
+                        b > bm || (b == bm && s.capability >= cap)
+                    })
+                    .unwrap_or(selected.len());
+                selected.insert(insert_at, m);
                 selected.truncate(20);
             }
         }
