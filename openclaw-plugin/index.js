@@ -3,8 +3,10 @@ import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 
 const DEFAULTS = {
   apiUrl: "http://127.0.0.1:3000/v1/systemone",
-  model: "kev-latest",
-  tierMinConfidence: 0.75,
+  // Canonical decision-model name served by openjev-shim (:3000). The shim
+  // ignores this field, but a wrong value reads like a config bug.
+  model: "openjev-flash-9b",
+  tierMinConfidence: 0.65,
   timeoutMs: 2500,
   debugFile: "/tmp/jev-router.log",
 };
@@ -35,6 +37,15 @@ function normaliseTiers(raw) {
   return out;
 }
 
+/*
+ * Config keys and who owns them:
+ *   apiUrl / tiers / model / tierMinConfidence / timeoutMs  — read here.
+ *   defaultModel / defaultProvider — written by `sage apply` and used as the
+ *     seed for `~/.config/opencode/opencode.json`'s `model`. Deliberately NOT
+ *     read here: forcing them on every turn would override an explicit model
+ *     choice. They are allowed in the config schema (b8cc344) but inert for
+ *     routing, which is by design, not a bug.
+ */
 export default definePluginEntry({
   id: "jev-router",
   name: "Jev Router",
