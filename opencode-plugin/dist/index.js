@@ -523,7 +523,14 @@ async function routePayload(cfg, target, payload, sessionId) {
     // protocol. The field is optional for replay, so drop it from history on
     // every routed request; the current turn's reasoning is unaffected.
     let stripped = 0;
-    for (const message of Array.isArray(payload.messages) ? payload.messages : []) {
+    // History arrives as `messages` (chat/Anthropic) or `input` (Responses API).
+    // Reading only `messages` left Responses-API payloads untouched.
+    const history = Array.isArray(payload.messages)
+        ? payload.messages
+        : Array.isArray(payload.input)
+            ? payload.input
+            : [];
+    for (const message of history) {
         if (message && typeof message === "object" && "reasoning_details" in message) {
             delete message.reasoning_details;
             stripped += 1;
@@ -531,6 +538,26 @@ async function routePayload(cfg, target, payload, sessionId) {
     }
     if (stripped > 0) {
         log(`stripped reasoning_details from ${stripped} history message(s)`);
+    }
+    // Forked sessions (and any session that resumed reasoning) make opencode emit
+    // composite reasoning ids like `rs_a:rs_b`, which the Responses API rejects
+    // outright: "Expected an ID that contains letters, numbers, underscores, or
+    // dashes". The id is only a local correlation key for replay, so drop the
+    // reasoning items carrying one and let the model continue without them.
+    let droppedComposite = 0;
+    for (const item of history) {
+        if (!item || typeof item !== "object") continue;
+        if (typeof item.id === "string" && item.id.includes(":")) {
+            item.__jevComposite = true;
+            droppedComposite += 1;
+        }
+    }
+    if (droppedComposite > 0 && Array.isArray(payload.input)) {
+        payload.input = payload.input.filter((item) => !item || !item.__jevComposite);
+        log(`dropped ${droppedComposite} history item(s) with composite reasoning ids`);
+    } else if (droppedComposite > 0 && Array.isArray(payload.messages)) {
+        payload.messages = payload.messages.filter((item) => !item || !item.__jevComposite);
+        log(`dropped ${droppedComposite} history message(s) with composite reasoning ids`);
     }
     // No usable candidate, or a lone candidate: trimming can only reproduce the
     // original tools array — built-ins always pass through untouched — so there
@@ -577,7 +604,16 @@ async function routePayload(cfg, target, payload, sessionId) {
                 log(`sticky: model ${current} -> ${sticky.model} (session ${sessionId})`);
             }
         } else {
-            const historyLen = Array.isArray(payload.messages) ? payload.messages.length : 0;
+            // Responses-API providers (gpt-6-luna, codex-family) carry history in
+            // `input`, not `messages`. Reading only `messages` left this guard dead
+            // for them, so every turn looked like a fresh session and the model
+            // switched mid-conversation — which makes opencode emit composite
+            // reasoning ids (`rs_a:rs_b`) that the Responses API rejects.
+            const historyLen = Array.isArray(payload.messages)
+                ? payload.messages.length
+                : Array.isArray(payload.input)
+                    ? payload.input.length
+                    : 0;
             if (current !== undefined && historyLen > 2) {
                 // Never switch an established session: opencode stores provider
                 // metadata per message and a late switch breaks history replay.
@@ -591,7 +627,11 @@ async function routePayload(cfg, target, payload, sessionId) {
                     if (current !== pick.rung.model) {
                         // Drop provider-specific reasoning metadata so the new model can
                         // replay the history without a protocol mismatch.
-                        for (const message of Array.isArray(payload.messages) ? payload.messages : []) {
+                        for (const message of Array.isArray(payload.messages)
+                            ? payload.messages
+                            : Array.isArray(payload.input)
+                                ? payload.input
+                                : []) {
                             if (message && typeof message === "object") {
                                 delete message.reasoning_details;
                                 delete message.provider_metadata;

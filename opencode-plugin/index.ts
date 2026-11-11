@@ -583,6 +583,49 @@ async function askJev(
 
 /* --------------------------------------------------- interception core */
 
+/** Remove Responses API reasoning items whose replay IDs are invalid composites. */
+function sanitizeHistory(payload: Record<string, unknown>): boolean {
+  const key = Array.isArray(payload.input)
+    ? "input"
+    : Array.isArray(payload.messages)
+      ? "messages"
+      : undefined;
+  if (!key) return false;
+
+  const history = payload[key] as unknown[];
+  let changed = false;
+  let stripped = 0;
+  let droppedComposite = 0;
+  const cleaned = history.filter((item) => {
+    if (typeof item !== "object" || item === null) return true;
+    const record = item as Record<string, unknown>;
+    if ("reasoning_details" in record) {
+      delete record.reasoning_details;
+      changed = true;
+      stripped += 1;
+    }
+    if (
+      record.type === "reasoning" &&
+      typeof record.id === "string" &&
+      record.id.includes(":")
+    ) {
+      changed = true;
+      droppedComposite += 1;
+      return false;
+    }
+    return true;
+  });
+
+  if (droppedComposite > 0) {
+    payload[key] = cleaned;
+    log(`dropped ${droppedComposite} history item(s) with composite reasoning ids`);
+  }
+  if (stripped > 0) {
+    log(`stripped reasoning_details from ${stripped} history message(s)`);
+  }
+  return changed;
+}
+
 async function routePayload(
   cfg: JevConfig,
   target: Target,
@@ -717,9 +760,16 @@ async function handleRequest(
   }
   try {
     const payload = JSON.parse(text) as Record<string, unknown>;
-    if (payload && typeof payload === "object" && eligible(payload)) {
-      const forced = await routePayload(cfg, target, payload);
-      return rebuildRequest(request, forced ? JSON.stringify(payload) : text);
+    if (payload && typeof payload === "object") {
+      let changed = sanitizeHistory(payload);
+      if (eligible(payload)) {
+        try {
+          changed = (await routePayload(cfg, target, payload)) || changed;
+        } catch (error) {
+          log(`routing failed after history cleanup: ${error}`);
+        }
+      }
+      return rebuildRequest(request, changed ? JSON.stringify(payload) : text);
     }
   } catch (error) {
     log(`intercept failed, falling back to untouched request: ${error}`);
